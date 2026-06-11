@@ -16,16 +16,16 @@
       "enabledByDefault": true
     },
     {
-      "id": "ghfast-top",
-      "name": "GHFast GitHub 加速",
-      "baseUrl": "https://ghfast.top/",
+      "id": "gh-proxy",
+      "name": "GHProxy GitHub 加速",
+      "baseUrl": "https://gh-proxy.com/",
       "rules": [],
       "supports": {
         "api": false,
         "raw": true,
         "releaseAsset": true
       },
-      "healthCheckUrl": "https://ghfast.top/https://github.com/",
+      "healthCheckUrl": "https://gh-proxy.com/https://github.com/",
       "enabledByDefault": false
     },
     {
