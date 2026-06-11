@@ -11,7 +11,7 @@ use crate::{
 use std::{fs, io::ErrorKind};
 
 const BUNDLED_ACCELERATORS_JSON: &str = include_str!("../../resources/github-accelerators.json");
-const REQUIRED_ACCELERATOR_IDS: &[&str] = &["kabaka-113355", "direct"];
+const REQUIRED_ACCELERATOR_IDS: &[&str] = &["hubproxy-kabaka", "direct"];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum GithubTarget {
@@ -234,7 +234,7 @@ mod tests {
         assert!(list
             .sources
             .iter()
-            .any(|source| source.id == "kabaka-113355"));
+            .any(|source| source.id == "hubproxy-kabaka"));
         assert!(list.sources.iter().any(|source| source.id == "direct"));
     }
 
@@ -263,7 +263,7 @@ mod tests {
         );
         assert_eq!(
             rewritten,
-            "https://113355.kabaka.xyz/https://api.github.com/repos/Anuken/Mindustry/releases"
+            "https://hubproxy.kabaka.xyz/https://api.github.com/repos/Anuken/Mindustry/releases"
         );
     }
 
@@ -278,7 +278,7 @@ mod tests {
         assert_eq!(
             urls,
             vec![
-                "https://113355.kabaka.xyz/https://api.github.com/repos/Anuken/Mindustry/releases",
+                "https://hubproxy.kabaka.xyz/https://api.github.com/repos/Anuken/Mindustry/releases",
                 "https://api.github.com/repos/Anuken/Mindustry/releases"
             ]
         );

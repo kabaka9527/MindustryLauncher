@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-pub const DEFAULT_ACCELERATOR_PREFIX: &str = "https://113355.kabaka.xyz/";
+pub const DEFAULT_ACCELERATOR_PREFIX: &str = "https://hubproxy.kabaka.xyz/";
 pub const REMOTE_ACCELERATOR_LIST: &str =
     "https://raw.githubusercontent.com/kabaka9527/MindustryLauncher/main/resources/github-accelerators.json";
 pub const USER_AGENT: &str = "MindustryLauncher/0.1.0";
@@ -90,7 +90,7 @@ impl Settings {
             show_be: false,
             github_proxy_prefix: None,
             http_proxy: None,
-            selected_accelerator_id: Some("kabaka-113355".to_string()),
+            selected_accelerator_id: Some("hubproxy-kabaka".to_string()),
             channel_visibility: ChannelVisibility::default(),
             runtime_prompt_dismissed: false,
             debug_mode: false,
@@ -140,8 +140,8 @@ impl Default for AcceleratorList {
             updated_at: "built-in".to_string(),
             sources: vec![
                 Accelerator {
-                    id: "kabaka-113355".to_string(),
-                    name: "Kabaka GitHub 加速".to_string(),
+                    id: "hubproxy-kabaka".to_string(),
+                    name: "HubProxy GitHub 加速".to_string(),
                     base_url: DEFAULT_ACCELERATOR_PREFIX.to_string(),
                     rules: vec![],
                     supports: AcceleratorSupports {

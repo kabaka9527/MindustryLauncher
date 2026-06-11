@@ -3,16 +3,16 @@
   "updatedAt": "2026-06-11T00:00:00Z",
   "sources": [
     {
-      "id": "kabaka-113355",
-      "name": "Kabaka GitHub 加速",
-      "baseUrl": "https://113355.kabaka.xyz/",
+      "id": "hubproxy-kabaka",
+      "name": "HubProxy",
+      "baseUrl": "https://hubproxy.kabaka.xyz/",
       "rules": [],
       "supports": {
         "api": true,
         "raw": true,
         "releaseAsset": true
       },
-      "healthCheckUrl": "https://113355.kabaka.xyz/https://github.com/",
+      "healthCheckUrl": "https://hubproxy.kabaka.xyz/https://github.com/",
       "enabledByDefault": true
     },
     {
