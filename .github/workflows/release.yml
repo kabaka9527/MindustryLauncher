@@ -1,0 +1,163 @@
+name: Build And Release
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version, for example v0.1.0"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-release:
+    name: Build portable Windows exe and publish release
+    runs-on: windows-latest
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.event.head_commit.message, 'release:')
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve release version
+        id: release
+        shell: pwsh
+        env:
+          COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
+          MANUAL_VERSION: ${{ inputs.version }}
+        run: |
+          $rawVersion = ""
+          if ($env:GITHUB_EVENT_NAME -eq "workflow_dispatch") {
+            $rawVersion = $env:MANUAL_VERSION.Trim()
+          } else {
+            $firstLine = ($env:COMMIT_MESSAGE -split "`r?`n")[0].Trim()
+            if ($firstLine -notmatch '^release:\s*(v?[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?)\s*$') {
+              throw "Release commits must use: release: vX.Y.Z"
+            }
+            $rawVersion = $Matches[1]
+          }
+
+          if ($rawVersion -notmatch '^v?([0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?)$') {
+            throw "Invalid release version: $rawVersion"
+          }
+
+          $version = $Matches[1]
+          $tag = "v$version"
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "tag=$tag" >> $env:GITHUB_OUTPUT
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: "9"
+          run_install: false
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install dependencies
+        shell: pwsh
+        run: |
+          . .\scripts\dev-env.ps1
+          pnpm install --frozen-lockfile
+
+      - name: Validate project versions
+        shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          . .\scripts\dev-env.ps1
+          $packageVersion = node -p "require('./package.json').version"
+          $cargoVersion = (Select-String -Path "src-tauri/Cargo.toml" -Pattern '^version\s*=\s*"([^"]+)"' | Select-Object -First 1).Matches[0].Groups[1].Value
+          if ($packageVersion -ne $env:RELEASE_VERSION) {
+            throw "package.json version $packageVersion does not match release version $env:RELEASE_VERSION"
+          }
+          if ($cargoVersion -ne $env:RELEASE_VERSION) {
+            throw "src-tauri/Cargo.toml version $cargoVersion does not match release version $env:RELEASE_VERSION"
+          }
+
+      - name: Frontend type check
+        shell: pwsh
+        run: |
+          . .\scripts\dev-env.ps1
+          pnpm check
+
+      - name: Rust tests
+        shell: pwsh
+        run: |
+          . .\scripts\dev-env.ps1
+          cargo test --manifest-path .\src-tauri\Cargo.toml
+
+      - name: Build portable exe
+        shell: pwsh
+        run: |
+          . .\scripts\dev-env.ps1
+          pnpm build
+
+      - name: Prepare release asset
+        id: package
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          $assetName = "MindustryLauncher-$env:RELEASE_TAG-windows-x64.exe"
+          New-Item -ItemType Directory -Force -Path "release" | Out-Null
+          Copy-Item "src-tauri\target\release\mindustry-launcher.exe" "release\$assetName"
+          "asset=release/$assetName" >> $env:GITHUB_OUTPUT
+          "asset_name=$assetName" >> $env:GITHUB_OUTPUT
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.package.outputs.asset_name }}
+          path: ${{ steps.package.outputs.asset }}
+          if-no-files-found: error
+
+      - name: Publish GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+          RELEASE_ASSET: ${{ steps.package.outputs.asset }}
+        run: |
+          gh release view $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY *> $null
+          if ($LASTEXITCODE -eq 0) {
+            throw "Release $env:RELEASE_TAG already exists"
+          }
+
+          $notes = @"
+          MindustryLauncher $env:RELEASE_TAG
+
+          自动构建产物：
+          - $env:RELEASE_ASSET
+          "@
+
+          $args = @(
+            "release", "create", $env:RELEASE_TAG, $env:RELEASE_ASSET,
+            "--repo", $env:GITHUB_REPOSITORY,
+            "--target", $env:GITHUB_SHA,
+            "--title", "MindustryLauncher $env:RELEASE_TAG",
+            "--notes", $notes
+          )
+          if ($env:RELEASE_VERSION -match "-") {
+            $args += "--prerelease"
+          }
+          gh @args

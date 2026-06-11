@@ -1,0 +1,58 @@
+{
+  "version": 1,
+  "updatedAt": "2026-06-11T00:00:00Z",
+  "sources": [
+    {
+      "id": "kabaka-113355",
+      "name": "Kabaka GitHub 加速",
+      "baseUrl": "https://113355.kabaka.xyz/",
+      "rules": [],
+      "supports": {
+        "api": true,
+        "raw": true,
+        "releaseAsset": true
+      },
+      "healthCheckUrl": "https://113355.kabaka.xyz/https://github.com/",
+      "enabledByDefault": true
+    },
+    {
+      "id": "ghfast-top",
+      "name": "GHFast GitHub 加速",
+      "baseUrl": "https://ghfast.top/",
+      "rules": [],
+      "supports": {
+        "api": false,
+        "raw": true,
+        "releaseAsset": true
+      },
+      "healthCheckUrl": "https://ghfast.top/https://github.com/",
+      "enabledByDefault": false
+    },
+    {
+      "id": "direct",
+      "name": "GitHub 直连",
+      "baseUrl": "",
+      "rules": [
+        {
+          "from": "https://api.github.com/",
+          "to": "https://api.github.com/"
+        },
+        {
+          "from": "https://raw.githubusercontent.com/",
+          "to": "https://raw.githubusercontent.com/"
+        },
+        {
+          "from": "https://github.com/",
+          "to": "https://github.com/"
+        }
+      ],
+      "supports": {
+        "api": true,
+        "raw": true,
+        "releaseAsset": true
+      },
+      "healthCheckUrl": "https://github.com/",
+      "enabledByDefault": true
+    }
+  ]
+}
