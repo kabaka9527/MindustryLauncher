@@ -83,24 +83,22 @@ jobs:
         env:
           RELEASE_VERSION: ${{ steps.release.outputs.version }}
         run: |
+          . .\scripts\dev-env.ps1
+
           $v = $env:RELEASE_VERSION
           if ($v -notmatch '^[0-9]+\.[0-9]+\.[0-9]+') {
             throw "Invalid version: $v"
           }
 
-          function Patch-JsonVersion($path, $v) {
-            $raw = Get-Content $path -Raw
-            $patched = $raw -replace '"version"\s*:\s*"[^"]*"', "`"version`": `"$v`""
-            if ($patched -eq $raw) { throw "No version field found in $path" }
-            Set-Content $path -Value $patched -NoNewline -Encoding UTF8
-          }
+          node -e "const fs=require('fs');const f='package.json';const p=JSON.parse(fs.readFileSync(f,'utf8'));if(!p.version)throw new Error('No version in '+f);p.version='$v';fs.writeFileSync(f,JSON.stringify(p,null,2)+'\n')"
+          node -e "const fs=require('fs');const f='src-tauri/tauri.conf.json';const p=JSON.parse(fs.readFileSync(f,'utf8'));if(!p.version)throw new Error('No version in '+f);p.version='$v';fs.writeFileSync(f,JSON.stringify(p,null,2)+'\n')"
+          pnpm install --no-frozen-lockfile
 
-          Patch-JsonVersion "package.json" $v
-          Patch-JsonVersion "src-tauri/tauri.conf.json" $v
-
-          $cargo = Get-Content "src-tauri/Cargo.toml" -Raw
-          $cargo = $cargo -replace '(?m)^version\s*=\s*"[^"]*"', "version = `"$v`""
-          Set-Content "src-tauri/Cargo.toml" -Value $cargo -Encoding UTF8
+          $cargoPath = "src-tauri/Cargo.toml"
+          $cargo = Get-Content $cargoPath -Raw
+          $pattern = '(?s)(\[package\].*?version\s*=\s*")[^"]*(")'
+          $cargo = [regex]::Replace($cargo, $pattern, "`$1$v`$2")
+          [System.IO.File]::WriteAllText("$PWD\$cargoPath", $cargo)
 
           $pkgV = (node -p "require('./package.json').version").Trim()
           $cargoV = (Select-String -Path "src-tauri/Cargo.toml" -Pattern '^version\s*=\s*"([^"]+)"' | Select-Object -First 1).Matches[0].Groups[1].Value
