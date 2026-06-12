@@ -1,6 +1,6 @@
 [package]
 name = "mindustry-launcher"
-version = "0.1.0"
+version = "0.1.1"
 description = "A Tauri launcher for Mindustry and MindustryX."
 authors = ["kabaka9527"]
 license = "GPL-3.0"

@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 pub const DEFAULT_ACCELERATOR_PREFIX: &str = "https://hubproxy.kabaka.xyz/";
 pub const REMOTE_ACCELERATOR_LIST: &str =
     "https://raw.githubusercontent.com/kabaka9527/MindustryLauncher/main/resources/github-accelerators.json";
-pub const USER_AGENT: &str = "MindustryLauncher/0.1.0";
+pub const USER_AGENT: &str = "MindustryLauncher/0.1.1";
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub enum GameChannel {
