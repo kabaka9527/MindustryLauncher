@@ -95,22 +95,49 @@ jobs:
           pnpm install --no-frozen-lockfile
 
           $cargoPath = "src-tauri/Cargo.toml"
-          $cargo = Get-Content $cargoPath -Raw
-          $pattern = '(?ms)^(\[package\]\s*(?:(?!^\[).*$\r?\n)*?version\s*=\s*")([^"]*)(")'
-          $cargoMatch = [regex]::Match($cargo, $pattern)
-          if (-not $cargoMatch.Success) {
+          $cargoLines = [System.Collections.Generic.List[string]]::new()
+          $cargoLines.AddRange([System.IO.File]::ReadAllLines((Join-Path $PWD $cargoPath)))
+          $inPackage = $false
+          $cargoVersionPatched = $false
+          for ($i = 0; $i -lt $cargoLines.Count; $i++) {
+            $line = $cargoLines[$i]
+            if ($line -match '^\s*\[package\]\s*$') {
+              $inPackage = $true
+              continue
+            }
+            if ($inPackage -and $line -match '^\s*\[') {
+              break
+            }
+            if ($inPackage -and $line -match '^(\s*version\s*=\s*")[^"]*(".*)$') {
+              $cargoLines[$i] = $Matches[1] + $v + $Matches[2]
+              $cargoVersionPatched = $true
+              break
+            }
+          }
+          if (-not $cargoVersionPatched) {
             throw "No package version in $cargoPath"
           }
-          $cargo = [regex]::Replace($cargo, $pattern, '${1}' + $v + '${3}', 1)
-          [System.IO.File]::WriteAllText((Join-Path $PWD $cargoPath), $cargo)
+          [System.IO.File]::WriteAllLines((Join-Path $PWD $cargoPath), $cargoLines)
 
           $pkgV = (node -p "require('./package.json').version").Trim()
-          $cargo = Get-Content $cargoPath -Raw
-          $cargoMatch = [regex]::Match($cargo, $pattern)
-          if (-not $cargoMatch.Success) {
+          $cargoV = $null
+          $inPackage = $false
+          foreach ($line in [System.IO.File]::ReadAllLines((Join-Path $PWD $cargoPath))) {
+            if ($line -match '^\s*\[package\]\s*$') {
+              $inPackage = $true
+              continue
+            }
+            if ($inPackage -and $line -match '^\s*\[') {
+              break
+            }
+            if ($inPackage -and $line -match '^\s*version\s*=\s*"([^"]+)"') {
+              $cargoV = $Matches[1]
+              break
+            }
+          }
+          if (-not $cargoV) {
             throw "No package version in $cargoPath after patch"
           }
-          $cargoV = $cargoMatch.Groups[2].Value
           $confV = (node -p "require('./src-tauri/tauri.conf.json').version").Trim()
           Write-Host "package.json  -> $pkgV"
           Write-Host "Cargo.toml    -> $cargoV"
