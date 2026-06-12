@@ -100,6 +100,11 @@ type DeleteConfirmation =
       runtime: RuntimeInfo;
     };
 
+type ToastMessage = {
+  id: number;
+  text: string;
+};
+
 const channelLabels: Record<GameChannel, string> = {
   mindustry: "Mindustry",
   mindustryX: "MindustryX",
@@ -139,6 +144,8 @@ export default function App() {
   const [runtimeGuideOpen, setRuntimeGuideOpen] = useState(false);
   const [editingInstanceId, setEditingInstanceId] = useState<string | null>(null);
   const [deleteConfirmation, setDeleteConfirmation] = useState<DeleteConfirmation | null>(null);
+  const [toastMessage, setToastMessage] = useState<ToastMessage | null>(null);
+  const toastTimerRef = useRef<number | null>(null);
   const [instanceSettingsDraft, setInstanceSettingsDraft] = useState<{
     runtimeId: string;
     launchSettings: LaunchSettings;
@@ -183,6 +190,14 @@ export default function App() {
       .catch((error) => setNotice(toMessage(error)))
       .finally(() => setBusy(null));
   }, [reload]);
+
+  useEffect(() => {
+    return () => {
+      if (toastTimerRef.current !== null) {
+        window.clearTimeout(toastTimerRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (state && !runtimeCatalogLoaded) {
@@ -388,6 +403,17 @@ export default function App() {
     }
   }, []);
 
+  function showDownloadToast() {
+    if (toastTimerRef.current !== null) {
+      window.clearTimeout(toastTimerRef.current);
+    }
+    setToastMessage({ id: Date.now(), text: "正在下载，请稍候…" });
+    toastTimerRef.current = window.setTimeout(() => {
+      setToastMessage(null);
+      toastTimerRef.current = null;
+    }, 2600);
+  }
+
   async function runWithBusy<T>(key: string, action: () => Promise<T>, done?: string) {
     setBusy(key);
     try {
@@ -512,6 +538,11 @@ export default function App() {
   }
 
   async function onSwitchVersion(version: RemoteVersion) {
+    if (busy === `install:${version.id}` || busy === `switch:${version.id}`) {
+      showDownloadToast();
+      setNotice("正在下载，请稍候…");
+      return;
+    }
     const sameChannelInstances = (state?.instances ?? []).filter(
       (instance) => instance.channel === version.channel && instance.id !== version.id,
     );
@@ -526,6 +557,8 @@ export default function App() {
         return;
       }
     }
+    showDownloadToast();
+    setNotice("正在下载，请稍候…");
     const channel = new Channel<TaskEvent>();
     channel.onmessage = handleTaskEvent;
     await runWithBusy(`switch:${version.id}`, async () => {
@@ -1131,6 +1164,14 @@ export default function App() {
           />
         )}
       </main>
+      {toastMessage && (
+        <div className="toast-layer" role="status" aria-live="polite">
+          <div className="toast-message" key={toastMessage.id}>
+            <Loader2 className="spin" size={17} />
+            <span>{toastMessage.text}</span>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
