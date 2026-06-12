@@ -96,12 +96,21 @@ jobs:
 
           $cargoPath = "src-tauri/Cargo.toml"
           $cargo = Get-Content $cargoPath -Raw
-          $pattern = '(?s)(\[package\].*?version\s*=\s*")[^"]*(")'
-          $cargo = [regex]::Replace($cargo, $pattern, "`$1$v`$2")
-          [System.IO.File]::WriteAllText("$PWD\$cargoPath", $cargo)
+          $pattern = '(?ms)^(\[package\]\s*(?:(?!^\[).*$\r?\n)*?version\s*=\s*")([^"]*)(")'
+          $cargoMatch = [regex]::Match($cargo, $pattern)
+          if (-not $cargoMatch.Success) {
+            throw "No package version in $cargoPath"
+          }
+          $cargo = [regex]::Replace($cargo, $pattern, '${1}' + $v + '${3}', 1)
+          [System.IO.File]::WriteAllText((Join-Path $PWD $cargoPath), $cargo)
 
           $pkgV = (node -p "require('./package.json').version").Trim()
-          $cargoV = (Select-String -Path "src-tauri/Cargo.toml" -Pattern '^version\s*=\s*"([^"]+)"' | Select-Object -First 1).Matches[0].Groups[1].Value
+          $cargo = Get-Content $cargoPath -Raw
+          $cargoMatch = [regex]::Match($cargo, $pattern)
+          if (-not $cargoMatch.Success) {
+            throw "No package version in $cargoPath after patch"
+          }
+          $cargoV = $cargoMatch.Groups[2].Value
           $confV = (node -p "require('./src-tauri/tauri.conf.json').version").Trim()
           Write-Host "package.json  -> $pkgV"
           Write-Host "Cargo.toml    -> $cargoV"
