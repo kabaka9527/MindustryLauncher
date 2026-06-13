@@ -50,7 +50,7 @@ impl Default for ChannelVisibility {
     fn default() -> Self {
         Self {
             mindustry: true,
-            mindustry_x: true,
+            mindustry_x: false,
             mindustry_be: false,
             mindustry_xbe: false,
         }
@@ -81,6 +81,8 @@ pub struct Settings {
     pub runtime_prompt_dismissed: bool,
     #[serde(default)]
     pub debug_mode: bool,
+    #[serde(default)]
+    pub ignored_versions: Vec<String>,
 }
 
 impl Settings {
@@ -94,6 +96,7 @@ impl Settings {
             channel_visibility: ChannelVisibility::default(),
             runtime_prompt_dismissed: false,
             debug_mode: false,
+            ignored_versions: Vec::new(),
         }
     }
 }
@@ -362,6 +365,16 @@ pub struct AppUiState {
     pub versions: Vec<RemoteVersion>,
     pub instances: Vec<InstalledInstance>,
     pub runtimes: Vec<RuntimeInfo>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LauncherUpdateInfo {
+    pub current_version: String,
+    pub latest_version: String,
+    pub has_update: bool,
+    pub release_url: String,
+    pub release_body: String,
 }
 
 #[cfg(test)]

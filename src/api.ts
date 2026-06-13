@@ -1,4 +1,5 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
   AcceleratorList,
   AppUiState,
@@ -6,6 +7,7 @@ import type {
   InstalledInstance,
   LaunchSettings,
   LaunchResult,
+  LauncherUpdateInfo,
   MigrationResult,
   RemoteRuntime,
   RemoteVersion,
@@ -28,6 +30,16 @@ export function refreshAccelerators() {
 
 export function refreshVersions() {
   return invoke<RemoteVersion[]>("refresh_versions");
+}
+
+export function startupRefreshVersions() {
+  return invoke<RemoteVersion[]>("startup_refresh_versions");
+}
+
+export function onVersionsRefreshed(callback: (versions: RemoteVersion[]) => void): Promise<UnlistenFn> {
+  return listen<RemoteVersion[]>("versions-refreshed", (event) => {
+    callback(event.payload);
+  });
 }
 
 export function installVersion(version: RemoteVersion, onEvent: Channel<TaskEvent>) {
@@ -120,4 +132,12 @@ export function openDebugLogDir() {
 
 export function openDebugLogWindow() {
   return invoke<void>("open_debug_log_window");
+}
+
+export function checkLauncherUpdate() {
+  return invoke<LauncherUpdateInfo>("check_launcher_update");
+}
+
+export function ignoreLauncherVersion(version: string) {
+  return invoke<Settings>("ignore_launcher_version", { version });
 }

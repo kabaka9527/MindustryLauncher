@@ -8,7 +8,8 @@ use crate::{
 };
 use regex::Regex;
 use serde::Deserialize;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
+use std::sync::OnceLock;
 use url::Url;
 
 // Version discovery is intentionally GitHub-release based. Each source is
@@ -35,106 +36,71 @@ pub async fn refresh_versions(
     settings: &Settings,
     layout: &InstallLayout,
     accelerators: &crate::models::AcceleratorList,
+    scope: VersionRefreshScope,
 ) -> AppResult<Vec<RemoteVersion>> {
     let network = NetworkClient::new(settings, layout.cache_dir.join("http"))?;
     let instances = config::load_instances(layout)?;
+
+    // Build a list of channel fetch tasks. Each channel is fetched in parallel
+    // so the total wall-clock time is bounded by the slowest channel instead of
+    // the sum of all channels.
+    #[derive(Debug)]
+    struct ChannelResult {
+        channel: GameChannel,
+        result: Result<Vec<RemoteVersion>, String>,
+    }
+
+    let mut handles = Vec::new();
+
+    for spec in channel_fetch_specs(settings, scope) {
+        let network = network.clone();
+        let settings = settings.clone();
+        let accelerators = accelerators.clone();
+        let instances = instances.clone();
+        handles.push(tokio::spawn(async move {
+            let result = fetch_channel(
+                &network,
+                &settings,
+                &accelerators,
+                spec.channel,
+                spec.owner,
+                spec.repo,
+                spec.filter,
+                &instances,
+            )
+            .await;
+            ChannelResult {
+                channel: spec.channel,
+                result: match result {
+                    Ok(items) => Ok(items),
+                    Err(err) => Err(format!("{}: {err}", spec.label)),
+                },
+            }
+        }));
+    }
+
+    // Await all spawned tasks and collect results.
     let mut versions = Vec::new();
     let mut errors = Vec::new();
     let mut refreshed_channels = HashSet::new();
 
-    if settings
-        .channel_visibility
-        .is_visible(GameChannel::Mindustry, settings.show_be)
-    {
-        match fetch_channel(
-            &network,
-            settings,
-            accelerators,
-            GameChannel::Mindustry,
-            "Anuken",
-            "Mindustry",
-            ReleaseFilter::Stable,
-            &instances,
-        )
-        .await
-        {
-            Ok(items) => {
-                refreshed_channels.insert(GameChannel::Mindustry);
+    for handle in handles {
+        match handle.await {
+            Ok(ChannelResult {
+                channel,
+                result: Ok(items),
+            }) => {
+                refreshed_channels.insert(channel);
                 versions.extend(items);
             }
-            Err(err) => errors.push(format!("Mindustry: {err}")),
-        }
-    }
-
-    if settings
-        .channel_visibility
-        .is_visible(GameChannel::MindustryX, settings.show_be)
-    {
-        match fetch_channel(
-            &network,
-            settings,
-            accelerators,
-            GameChannel::MindustryX,
-            "TinyLake",
-            "MindustryX",
-            ReleaseFilter::Stable,
-            &instances,
-        )
-        .await
-        {
-            Ok(items) => {
-                refreshed_channels.insert(GameChannel::MindustryX);
-                versions.extend(items);
+            Ok(ChannelResult {
+                result: Err(err), ..
+            }) => {
+                errors.push(err);
             }
-            Err(err) => errors.push(format!("MindustryX: {err}")),
-        }
-    }
-
-    if settings
-        .channel_visibility
-        .is_visible(GameChannel::MindustryBE, settings.show_be)
-    {
-        match fetch_channel(
-            &network,
-            settings,
-            accelerators,
-            GameChannel::MindustryBE,
-            "Anuken",
-            "MindustryBuilds",
-            ReleaseFilter::Any,
-            &instances,
-        )
-        .await
-        {
-            Ok(items) => {
-                refreshed_channels.insert(GameChannel::MindustryBE);
-                versions.extend(items);
+            Err(join_err) => {
+                errors.push(format!("channel task panicked: {join_err}"));
             }
-            Err(err) => errors.push(format!("Mindustry BE: {err}")),
-        }
-    }
-
-    if settings
-        .channel_visibility
-        .is_visible(GameChannel::MindustryXBE, settings.show_be)
-    {
-        match fetch_channel(
-            &network,
-            settings,
-            accelerators,
-            GameChannel::MindustryXBE,
-            "TinyLake",
-            "MindustryX",
-            ReleaseFilter::Prerelease,
-            &instances,
-        )
-        .await
-        {
-            Ok(items) => {
-                refreshed_channels.insert(GameChannel::MindustryXBE);
-                versions.extend(items);
-            }
-            Err(err) => errors.push(format!("MindustryX BE: {err}")),
         }
     }
 
@@ -156,6 +122,24 @@ pub fn load_cached_versions(layout: &InstallLayout) -> AppResult<Vec<RemoteVersi
     Ok(fs_util::read_json(&layout.versions_cache_path())?.unwrap_or_default())
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum VersionRefreshScope {
+    #[allow(dead_code)]
+    Visible,
+    All,
+}
+
+impl VersionRefreshScope {
+    fn includes(self, settings: &Settings, channel: GameChannel) -> bool {
+        match self {
+            Self::Visible => settings
+                .channel_visibility
+                .is_visible(channel, settings.show_be),
+            Self::All => true,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 enum ReleaseFilter {
     Stable,
@@ -173,6 +157,51 @@ impl ReleaseFilter {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+struct ChannelFetchSpec {
+    channel: GameChannel,
+    owner: &'static str,
+    repo: &'static str,
+    filter: ReleaseFilter,
+    label: &'static str,
+}
+
+fn channel_fetch_specs(settings: &Settings, scope: VersionRefreshScope) -> Vec<ChannelFetchSpec> {
+    [
+        ChannelFetchSpec {
+            channel: GameChannel::Mindustry,
+            owner: "Anuken",
+            repo: "Mindustry",
+            filter: ReleaseFilter::Stable,
+            label: "Mindustry",
+        },
+        ChannelFetchSpec {
+            channel: GameChannel::MindustryX,
+            owner: "TinyLake",
+            repo: "MindustryX",
+            filter: ReleaseFilter::Stable,
+            label: "MindustryX",
+        },
+        ChannelFetchSpec {
+            channel: GameChannel::MindustryBE,
+            owner: "Anuken",
+            repo: "MindustryBuilds",
+            filter: ReleaseFilter::Any,
+            label: "Mindustry BE",
+        },
+        ChannelFetchSpec {
+            channel: GameChannel::MindustryXBE,
+            owner: "TinyLake",
+            repo: "MindustryX",
+            filter: ReleaseFilter::Prerelease,
+            label: "MindustryX BE",
+        },
+    ]
+    .into_iter()
+    .filter(|spec| scope.includes(settings, spec.channel))
+    .collect()
+}
+
 async fn fetch_channel(
     network: &NetworkClient,
     settings: &Settings,
@@ -184,9 +213,11 @@ async fn fetch_channel(
     instances: &[crate::models::InstalledInstance],
 ) -> AppResult<Vec<RemoteVersion>> {
     let url = format!("https://api.github.com/repos/{owner}/{repo}/releases?per_page=20");
+    let candidates = github_url_candidates(&url, settings, accelerators);
     let mut last_error = None;
-    for candidate in github_url_candidates(&url, settings, accelerators) {
-        match network.get_json::<Vec<GithubRelease>>(&candidate).await {
+
+    if candidates.len() == 1 {
+        match network.get_json::<Vec<GithubRelease>>(&candidates[0]).await {
             Ok(releases) => {
                 return Ok(releases
                     .into_iter()
@@ -195,6 +226,25 @@ async fn fetch_channel(
                     .collect());
             }
             Err(err) => last_error = Some(err),
+        }
+    } else if !candidates.is_empty() {
+        let mut set = tokio::task::JoinSet::new();
+        for candidate in candidates {
+            let network = network.clone();
+            set.spawn(async move { network.get_json::<Vec<GithubRelease>>(&candidate).await });
+        }
+        while let Some(res) = set.join_next().await {
+            match res {
+                Ok(Ok(releases)) => {
+                    return Ok(releases
+                        .into_iter()
+                        .filter(|release| filter.matches(release.prerelease))
+                        .filter_map(|release| map_release(channel, release, instances))
+                        .collect());
+                }
+                Ok(Err(err)) => last_error = Some(err),
+                Err(e) => last_error = Some(AppError::Network(e.to_string())),
+            }
         }
     }
 
@@ -235,20 +285,40 @@ async fn fetch_channel_from_release_pages(
     )
     .await?;
     let releases = parse_releases_atom(owner, repo, &atom)?;
-    let mut versions = Vec::new();
-
-    for release in releases
+    let filtered: Vec<AtomRelease> = releases
         .into_iter()
         .filter(|release| filter.matches(release.prerelease))
         .take(20)
-    {
+        .collect();
+
+    let semaphore = std::sync::Arc::new(tokio::sync::Semaphore::new(4));
+    // Fetch all expanded_assets pages concurrently instead of sequentially.
+    let mut handles = Vec::with_capacity(filtered.len());
+    for release in &filtered {
         let assets_url = expanded_assets_url(owner, repo, &release.tag)?;
-        let assets_html = get_first_text(
-            network,
-            &github_url_candidates(&assets_url, settings, accelerators),
-        )
-        .await?;
-        let assets = parse_expanded_assets(&assets_html);
+        let candidates = github_url_candidates(&assets_url, settings, accelerators);
+        let network = network.clone();
+        let tag = release.tag.clone();
+        let permit = semaphore.clone().acquire_owned().await.unwrap();
+        handles.push(tokio::spawn(async move {
+            let _permit = permit;
+            match get_first_text(&network, &candidates).await {
+                Ok(html) => (tag, parse_expanded_assets(&html)),
+                Err(_) => (tag, Vec::new()),
+            }
+        }));
+    }
+
+    let mut assets_by_tag = HashMap::new();
+    for handle in handles {
+        if let Ok((tag, assets)) = handle.await {
+            assets_by_tag.insert(tag, assets);
+        }
+    }
+
+    let mut versions = Vec::new();
+    for release in filtered {
+        let assets = assets_by_tag.remove(&release.tag).unwrap_or_default();
         let selected_asset = select_desktop_jar(&assets);
         if selected_asset.is_none() {
             continue;
@@ -274,11 +344,26 @@ async fn fetch_channel_from_release_pages(
 }
 
 async fn get_first_text(network: &NetworkClient, urls: &[String]) -> AppResult<String> {
-    let mut last_error = None;
+    if urls.is_empty() {
+        return Err(AppError::Network("no URL candidates".to_string()));
+    }
+    if urls.len() == 1 {
+        return network.get_text_cached(&urls[0]).await;
+    }
+
+    let mut set = tokio::task::JoinSet::new();
     for url in urls {
-        match network.get_text_cached(url).await {
-            Ok(text) => return Ok(text),
-            Err(err) => last_error = Some(err),
+        let network = network.clone();
+        let url = url.clone();
+        set.spawn(async move { network.get_text_cached(&url).await });
+    }
+
+    let mut last_error = None;
+    while let Some(res) = set.join_next().await {
+        match res {
+            Ok(Ok(text)) => return Ok(text),
+            Ok(Err(err)) => last_error = Some(err),
+            Err(e) => last_error = Some(AppError::Network(e.to_string())),
         }
     }
     Err(last_error.unwrap_or_else(|| AppError::Network("no URL candidates".to_string())))
@@ -293,33 +378,40 @@ struct AtomRelease {
 }
 
 fn parse_releases_atom(owner: &str, repo: &str, body: &str) -> AppResult<Vec<AtomRelease>> {
-    let entry_regex = Regex::new(r"(?s)<entry>(.*?)</entry>")
-        .map_err(|err| AppError::Invalid(err.to_string()))?;
-    let link_regex = Regex::new(&format!(
+    fn entry_regex() -> &'static Regex {
+        static RE: OnceLock<Regex> = OnceLock::new();
+        RE.get_or_init(|| Regex::new(r"(?s)<entry>(.*?)</entry>").expect("valid entry regex"))
+    }
+    fn title_regex() -> &'static Regex {
+        static RE: OnceLock<Regex> = OnceLock::new();
+        RE.get_or_init(|| Regex::new(r"(?s)<title>(.*?)</title>").expect("valid title regex"))
+    }
+    fn updated_regex() -> &'static Regex {
+        static RE: OnceLock<Regex> = OnceLock::new();
+        RE.get_or_init(|| Regex::new(r"(?s)<updated>(.*?)</updated>").expect("valid updated regex"))
+    }
+
+    let link_pattern = format!(
         r#"https://github\.com/{}/{}/releases/tag/([^"<]+)"#,
         regex::escape(owner),
         regex::escape(repo)
-    ))
-    .map_err(|err| AppError::Invalid(err.to_string()))?;
-    let title_regex = Regex::new(r"(?s)<title>(.*?)</title>")
-        .map_err(|err| AppError::Invalid(err.to_string()))?;
-    let updated_regex = Regex::new(r"(?s)<updated>(.*?)</updated>")
-        .map_err(|err| AppError::Invalid(err.to_string()))?;
+    );
+    let link_regex = Regex::new(&link_pattern).map_err(|err| AppError::Invalid(err.to_string()))?;
 
     let mut releases = Vec::new();
-    for entry in entry_regex.captures_iter(body) {
+    for entry in entry_regex().captures_iter(body) {
         let block = &entry[1];
         let Some(tag_match) = link_regex.captures(block).and_then(|caps| caps.get(1)) else {
             continue;
         };
         let tag = decode_html(tag_match.as_str());
-        let title = title_regex
+        let title = title_regex()
             .captures(block)
             .and_then(|caps| caps.get(1))
             .map(|value| decode_html(value.as_str()))
             .filter(|value| !value.trim().is_empty())
             .unwrap_or_else(|| tag.clone());
-        let published_at = updated_regex
+        let published_at = updated_regex()
             .captures(block)
             .and_then(|caps| caps.get(1))
             .map(|value| decode_html(value.as_str()));
@@ -348,10 +440,14 @@ fn expanded_assets_url(owner: &str, repo: &str, tag: &str) -> AppResult<String> 
 }
 
 fn parse_expanded_assets(body: &str) -> Vec<ReleaseAsset> {
-    let regex = Regex::new(r#"href="([^"]+?\.jar)""#).expect("valid asset regex");
+    fn jar_regex() -> &'static Regex {
+        static RE: OnceLock<Regex> = OnceLock::new();
+        RE.get_or_init(|| Regex::new(r#"href="([^"]+?\.jar)""#).expect("valid asset regex"))
+    }
+
     let mut seen = HashSet::new();
     let mut assets = Vec::new();
-    for captures in regex.captures_iter(body) {
+    for captures in jar_regex().captures_iter(body) {
         let href = decode_html(&captures[1]);
         let download_url = if href.starts_with("https://") {
             href
@@ -467,8 +563,8 @@ pub fn require_selected_asset(version: &RemoteVersion) -> AppResult<ReleaseAsset
 
 #[cfg(test)]
 mod tests {
-    use super::select_desktop_jar;
-    use crate::models::ReleaseAsset;
+    use super::{channel_fetch_specs, select_desktop_jar, VersionRefreshScope};
+    use crate::models::{ChannelVisibility, GameChannel, ReleaseAsset, Settings};
 
     fn asset(name: &str) -> ReleaseAsset {
         ReleaseAsset {
@@ -477,6 +573,60 @@ mod tests {
             download_url: format!("https://github.com/example/{name}"),
             digest: None,
         }
+    }
+
+    fn channels_for(settings: &Settings, scope: VersionRefreshScope) -> Vec<GameChannel> {
+        channel_fetch_specs(settings, scope)
+            .into_iter()
+            .map(|spec| spec.channel)
+            .collect()
+    }
+
+    #[test]
+    fn visible_refresh_scope_uses_current_channel_visibility() {
+        let settings = Settings::with_install_root("D:/MindustryLauncher/app-data".to_string());
+
+        assert_eq!(
+            channels_for(&settings, VersionRefreshScope::Visible),
+            vec![GameChannel::Mindustry]
+        );
+    }
+
+    #[test]
+    fn all_refresh_scope_includes_every_channel() {
+        let settings = Settings::with_install_root("D:/MindustryLauncher/app-data".to_string());
+
+        assert_eq!(
+            channels_for(&settings, VersionRefreshScope::All),
+            vec![
+                GameChannel::Mindustry,
+                GameChannel::MindustryX,
+                GameChannel::MindustryBE,
+                GameChannel::MindustryXBE
+            ]
+        );
+    }
+
+    #[test]
+    fn all_refresh_scope_ignores_disabled_visibility() {
+        let mut settings = Settings::with_install_root("D:/MindustryLauncher/app-data".to_string());
+        settings.show_be = false;
+        settings.channel_visibility = ChannelVisibility {
+            mindustry: false,
+            mindustry_x: false,
+            mindustry_be: false,
+            mindustry_xbe: false,
+        };
+
+        assert_eq!(
+            channels_for(&settings, VersionRefreshScope::All),
+            vec![
+                GameChannel::Mindustry,
+                GameChannel::MindustryX,
+                GameChannel::MindustryBE,
+                GameChannel::MindustryXBE
+            ]
+        );
     }
 
     #[test]

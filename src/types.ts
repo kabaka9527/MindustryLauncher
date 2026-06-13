@@ -18,6 +18,7 @@ export type Settings = {
   channelVisibility: ChannelVisibility;
   runtimePromptDismissed: boolean;
   debugMode: boolean;
+  ignoredVersions: string[];
 };
 
 export type AcceleratorSupports = {
@@ -205,4 +206,12 @@ export type TaskRecord = {
   bytesPerSecond?: number | null;
   status: "running" | "paused" | "finished" | "failed" | "canceled";
   message?: string;
+};
+
+export type LauncherUpdateInfo = {
+  currentVersion: string;
+  latestVersion: string;
+  hasUpdate: boolean;
+  releaseUrl: string;
+  releaseBody: string;
 };

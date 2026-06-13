@@ -8,17 +8,19 @@ mod launcher;
 mod models;
 mod network;
 mod runtime;
+mod update;
 mod versions;
 
 use crate::{
     error::AppResult,
     models::{
         AcceleratorList, AppUiState, DebugLogSnapshot, InstalledInstance, LaunchResult,
-        LaunchSettings, MigrationResult, RemoteRuntime, RemoteVersion, RuntimeInfo, Settings,
-        TaskEvent,
+        LaunchSettings, LauncherUpdateInfo, MigrationResult, RemoteRuntime, RemoteVersion,
+        RuntimeInfo, Settings, TaskEvent,
     },
+    versions::VersionRefreshScope,
 };
-use tauri::{ipc::Channel, AppHandle, Manager, State};
+use tauri::{ipc::Channel, AppHandle, Emitter, Manager, State};
 use tokio::sync::RwLock;
 
 pub struct LauncherState {
@@ -68,11 +70,53 @@ async fn refresh_accelerators(state: State<'_, LauncherState>) -> AppResult<Acce
 }
 
 #[tauri::command(rename_all = "camelCase")]
+async fn startup_refresh_versions(
+    app: AppHandle,
+    state: State<'_, LauncherState>,
+) -> AppResult<Vec<RemoteVersion>> {
+    let settings = state.settings.read().await.clone();
+    let accelerators = state.accelerators.read().await.clone();
+    let layout = config::layout_from_settings(&settings)?;
+
+    // Spawn a background task that fetches versions and emits an event.
+    // The command returns immediately with cached versions; fresh data
+    // arrives asynchronously via the "versions-refreshed" event.
+    let bg_layout = layout.clone();
+    tokio::spawn(async move {
+        match versions::refresh_versions(
+            &settings,
+            &bg_layout,
+            &accelerators,
+            VersionRefreshScope::All,
+        )
+        .await
+        {
+            Ok(versions) => {
+                let _ = app.emit("versions-refreshed", versions);
+            }
+            Err(err) => {
+                let cached = versions::load_cached_versions(&bg_layout).unwrap_or_default();
+                if !cached.is_empty() {
+                    let _ = app.emit("versions-refreshed", cached);
+                }
+                debug_console::warn(format!("后台版本刷新失败：{err}"));
+            }
+        }
+    });
+
+    // Return cached versions immediately so the frontend can display
+    // something while the background refresh is in progress.
+    versions::load_cached_versions(&layout)
+}
+
+#[tauri::command(rename_all = "camelCase")]
 async fn refresh_versions(state: State<'_, LauncherState>) -> AppResult<Vec<RemoteVersion>> {
     let settings = state.settings.read().await.clone();
     let accelerators = state.accelerators.read().await.clone();
     let layout = config::layout_from_settings(&settings)?;
-    match versions::refresh_versions(&settings, &layout, &accelerators).await {
+    match versions::refresh_versions(&settings, &layout, &accelerators, VersionRefreshScope::All)
+        .await
+    {
         Ok(versions) => Ok(versions),
         Err(err) => {
             let cached = versions::load_cached_versions(&layout)?;
@@ -265,6 +309,31 @@ fn cancel_download(task_id: String) -> AppResult<()> {
     network::cancel_download_task(&task_id)
 }
 
+#[tauri::command(rename_all = "camelCase")]
+async fn check_launcher_update(
+    state: State<'_, LauncherState>,
+) -> AppResult<LauncherUpdateInfo> {
+    let settings = state.settings.read().await.clone();
+    let accelerators = state.accelerators.read().await.clone();
+    let layout = config::layout_from_settings(&settings)?;
+    update::check_launcher_update(&settings, &layout, &accelerators).await
+}
+
+#[tauri::command(rename_all = "camelCase")]
+async fn ignore_launcher_version(
+    app: AppHandle,
+    state: State<'_, LauncherState>,
+    version: String,
+) -> AppResult<Settings> {
+    let mut settings = state.settings.read().await.clone();
+    if !settings.ignored_versions.contains(&version) {
+        settings.ignored_versions.push(version);
+    }
+    let saved = config::save_settings(&app, &settings)?;
+    *state.settings.write().await = saved.clone();
+    Ok(saved)
+}
+
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -311,6 +380,7 @@ pub fn run() {
             save_settings,
             refresh_accelerators,
             refresh_versions,
+            startup_refresh_versions,
             install_version,
             switch_version,
             ensure_runtime,
@@ -331,7 +401,9 @@ pub fn run() {
             open_debug_log_window,
             pause_download,
             resume_download,
-            cancel_download
+            cancel_download,
+            check_launcher_update,
+            ignore_launcher_version
         ])
         .run(tauri::generate_context!())
         .expect("error while running Tauri application");

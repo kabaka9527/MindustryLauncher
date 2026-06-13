@@ -54,20 +54,44 @@ async fn fetch_remote_accelerators(
     settings: &Settings,
     layout: &InstallLayout,
 ) -> AppResult<AcceleratorList> {
-    let network = NetworkClient::new(settings, layout.cache_dir.join("http"))?;
     let accelerated_url = prefix_url(DEFAULT_ACCELERATOR_PREFIX, REMOTE_ACCELERATOR_LIST);
+    fetch_accelerator_list_from_urls(
+        settings,
+        layout,
+        vec![accelerated_url, REMOTE_ACCELERATOR_LIST.to_string()],
+    )
+    .await
+}
+
+async fn fetch_accelerator_list_from_urls(
+    settings: &Settings,
+    layout: &InstallLayout,
+    urls: Vec<String>,
+) -> AppResult<AcceleratorList> {
+    let network = NetworkClient::new(settings, layout.cache_dir.join("http"))?;
+    let mut set = tokio::task::JoinSet::new();
+    for url in urls {
+        let network = network.clone();
+        set.spawn(async move {
+            (
+                network.get_json_uncached::<AcceleratorList>(&url).await,
+                url,
+            )
+        });
+    }
+
     let mut last_error = None;
-    for url in [&accelerated_url, REMOTE_ACCELERATOR_LIST] {
-        match network.get_json_uncached::<AcceleratorList>(url).await {
-            Ok(remote) => match validate_accelerator_list(remote) {
+    while let Some(res) = set.join_next().await {
+        match res {
+            Ok((Ok(remote), _)) => match validate_accelerator_list(remote) {
                 Ok(list) => return Ok(ensure_required_sources(list)),
                 Err(err) => last_error = Some(err),
             },
-            Err(err) => {
-                last_error = Some(err);
-            }
+            Ok((Err(err), _)) => last_error = Some(err),
+            Err(e) => last_error = Some(AppError::Network(e.to_string())),
         }
     }
+
     Err(last_error.unwrap_or_else(|| {
         AppError::Network("no GitHub accelerator source could be loaded".to_string())
     }))
@@ -218,14 +242,41 @@ fn supports_target(source: &Accelerator, target: GithubTarget) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        bundled_accelerators, discard_legacy_accelerator_cache, github_url_candidates, prefix_url,
-        rewrite_github_url,
+        bundled_accelerators, discard_legacy_accelerator_cache, fetch_accelerator_list_from_urls,
+        github_url_candidates, prefix_url, rewrite_github_url,
     };
     use crate::{
         config::InstallLayout,
         models::{AcceleratorList, Settings},
     };
-    use std::{fs, path::PathBuf};
+    use std::{
+        fs,
+        io::{Read, Write},
+        net::TcpListener,
+        path::PathBuf,
+        thread,
+        time::{Duration, Instant},
+    };
+
+    const TEST_ACCELERATOR_LIST_JSON: &str = r#"{
+      "version": 7,
+      "updatedAt": "2026-06-13T00:00:00Z",
+      "sources": [
+        {
+          "id": "fast-local",
+          "name": "Fast Local Mirror",
+          "baseUrl": "https://fast.example/",
+          "rules": [],
+          "supports": {
+            "api": true,
+            "raw": true,
+            "releaseAsset": true
+          },
+          "healthCheckUrl": "https://fast.example/https://github.com/",
+          "enabledByDefault": true
+        }
+      ]
+    }"#;
 
     #[test]
     fn bundled_accelerators_include_required_sources() {
@@ -249,6 +300,47 @@ mod tests {
 
         assert!(!layout.legacy_accelerators_path().exists());
         discard_legacy_accelerator_cache(&layout).unwrap();
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn fetches_and_parses_remote_list_without_waiting_for_slow_candidate() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("target")
+            .join(format!(
+                "test-fetch-accelerators-speed-{}",
+                std::process::id()
+            ));
+        let _ = fs::remove_dir_all(&root);
+        let layout = InstallLayout::new(root.clone());
+        layout.ensure().unwrap();
+
+        let slow_url = spawn_json_server(TEST_ACCELERATOR_LIST_JSON, Duration::from_millis(1_200));
+        let fast_url = spawn_json_server(TEST_ACCELERATOR_LIST_JSON, Duration::ZERO);
+        let settings = Settings::with_install_root(root.to_string_lossy().to_string());
+
+        let started = Instant::now();
+        let list = fetch_accelerator_list_from_urls(&settings, &layout, vec![slow_url, fast_url])
+            .await
+            .unwrap();
+        let elapsed = started.elapsed();
+        let display_names: Vec<&str> = list
+            .sources
+            .iter()
+            .map(|source| source.name.as_str())
+            .collect();
+
+        assert!(
+            elapsed < Duration::from_millis(900),
+            "accelerator fetch and display parsing took {elapsed:?}"
+        );
+        assert!(display_names.contains(&"Fast Local Mirror"));
+        assert!(list
+            .sources
+            .iter()
+            .any(|source| source.id == "hubproxy-kabaka"));
+        assert!(list.sources.iter().any(|source| source.id == "direct"));
 
         let _ = fs::remove_dir_all(root);
     }
@@ -320,5 +412,27 @@ mod tests {
             prefix_url("https://a.example/", "/https://github.com/test"),
             "https://a.example/https://github.com/test"
         );
+    }
+
+    fn spawn_json_server(body: &'static str, delay: Duration) -> String {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        thread::spawn(move || {
+            if let Ok((mut stream, _)) = listener.accept() {
+                let mut buffer = [0_u8; 1024];
+                let _ = stream.read(&mut buffer);
+                if !delay.is_zero() {
+                    thread::sleep(delay);
+                }
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    body.len(),
+                    body
+                );
+                let _ = stream.write_all(response.as_bytes());
+                let _ = stream.flush();
+            }
+        });
+        format!("http://{address}/github-accelerators.json")
     }
 }

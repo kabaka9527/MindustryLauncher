@@ -13,9 +13,9 @@
     "windows": [
       {
         "title": "Mindustry Launcher",
-        "width": 1180,
-        "height": 760,
-        "minWidth": 960,
+        "width": 1024,
+        "height": 640,
+        "minWidth": 1024,
         "minHeight": 640,
         "center": true
       }

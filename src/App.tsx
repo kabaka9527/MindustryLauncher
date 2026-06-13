@@ -30,10 +30,12 @@ import type { ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   cancelDownload,
+  checkLauncherUpdate,
   clearDebugLog,
   deleteInstance,
   deleteRuntime,
   getAppState,
+  ignoreLauncherVersion,
   importRuntime,
   installVersion,
   installRuntime,
@@ -46,6 +48,8 @@ import {
   readDebugLog,
   refreshAccelerators,
   refreshVersions,
+  startupRefreshVersions,
+  onVersionsRefreshed,
   resumeDownload,
   scanRuntimes,
   saveInstanceLaunchSettings,
@@ -60,6 +64,7 @@ import type {
   GameChannel,
   InstalledInstance,
   LaunchSettings,
+  LauncherUpdateInfo,
   RemoteRuntime,
   RemoteVersion,
   RuntimeInfo,
@@ -69,7 +74,6 @@ import type {
   Theme,
 } from "./types";
 import alphaSprite from "./assets/mindustry/alpha.png";
-import basaltSprite from "./assets/mindustry/basalt1.png";
 import coreSprite from "./assets/mindustry/core-shard.png";
 import lancerSprite from "./assets/mindustry/lancer.png";
 import zenithSprite from "./assets/mindustry/zenith.png";
@@ -112,6 +116,13 @@ const channelLabels: Record<GameChannel, string> = {
   mindustryXBE: "MindustryX BE",
 };
 
+const channelSprites: Record<GameChannel, string> = {
+  mindustry: coreSprite,
+  mindustryX: zenithSprite,
+  mindustryBE: lancerSprite,
+  mindustryXBE: alphaSprite,
+};
+
 const channelVisibilityKeys: Array<{
   key: keyof ChannelVisibility;
   channel: GameChannel;
@@ -123,8 +134,16 @@ const channelVisibilityKeys: Array<{
   { key: "mindustryXbe", channel: "mindustryXBE", label: "MindustryX BE" },
 ];
 
+function isDebugLogWindow() {
+  try {
+    return getCurrentWindow().label === "debug-log";
+  } catch {
+    return false;
+  }
+}
+
 export default function App() {
-  if (getCurrentWindow().label === "debug-log") {
+  if (isDebugLogWindow()) {
     return <DebugLogWindow />;
   }
 
@@ -137,7 +156,6 @@ export default function App() {
   const [busy, setBusy] = useState<string | null>("load");
   const [notice, setNotice] = useState<string>("正在读取本地状态");
   const [startupAcceleratorsRefreshDone, setStartupAcceleratorsRefreshDone] = useState(false);
-  const [startupRefreshDone, setStartupRefreshDone] = useState(false);
   const [remoteRuntimes, setRemoteRuntimes] = useState<RemoteRuntime[]>([]);
   const [selectedRuntimeId, setSelectedRuntimeId] = useState("");
   const [runtimeCatalogLoaded, setRuntimeCatalogLoaded] = useState(false);
@@ -150,6 +168,8 @@ export default function App() {
     runtimeId: string;
     launchSettings: LaunchSettings;
   } | null>(null);
+  const [updateInfo, setUpdateInfo] = useState<LauncherUpdateInfo | null>(null);
+  const [showUpdatePrompt, setShowUpdatePrompt] = useState(false);
 
   const reload = useCallback(async () => {
     const next = await getAppState();
@@ -199,6 +219,25 @@ export default function App() {
     };
   }, []);
 
+  const [startupUpdateCheckDone, setStartupUpdateCheckDone] = useState(false);
+  useEffect(() => {
+    if (!state || startupUpdateCheckDone) {
+      return;
+    }
+    setStartupUpdateCheckDone(true);
+    checkLauncherUpdate()
+      .then((info) => {
+        setUpdateInfo(info);
+        if (info.hasUpdate) {
+          const ignored = state.settings.ignoredVersions ?? [];
+          if (!ignored.includes(info.latestVersion)) {
+            setShowUpdatePrompt(true);
+          }
+        }
+      })
+      .catch(() => {});
+  }, [startupUpdateCheckDone, state]);
+
   useEffect(() => {
     if (state && !runtimeCatalogLoaded) {
       void loadRuntimeCatalog();
@@ -230,7 +269,6 @@ export default function App() {
   useEffect(() => {
     if (
       state &&
-      state.instances.length > 0 &&
       state.runtimes.length === 0 &&
       !state.settings.runtimePromptDismissed
     ) {
@@ -238,25 +276,33 @@ export default function App() {
     }
   }, [state]);
 
+  // Kick off background version refresh right after initial state loads.
+  // The command returns cached versions immediately; fresh data arrives
+  // via the "versions-refreshed" event listener below.
+  const [startupVersionsRefreshDone, setStartupVersionsRefreshDone] = useState(false);
   useEffect(() => {
-    if (view !== "versions" || !state || startupRefreshDone || state.versions.length > 0) {
+    if (!state || startupVersionsRefreshDone) {
       return;
     }
-    setStartupRefreshDone(true);
-    setBusy("startupRefresh");
-    setNotice("正在获取默认版本列表");
-    refreshAccelerators()
-      .then((accelerators) => {
-        setState((current) => (current ? { ...current, accelerators } : current));
-        return refreshVersions();
+    setStartupVersionsRefreshDone(true);
+    startupRefreshVersions()
+      .then((cached) => {
+        setState((current) =>
+          current ? { ...current, versions: cached } : current,
+        );
       })
-      .then((versions) => {
-        setState((current) => (current ? { ...current, versions } : current));
-        setNotice("默认版本列表已加载");
-      })
-      .catch((error) => setNotice(toMessage(error)))
-      .finally(() => setBusy(null));
-  }, [startupRefreshDone, state, view]);
+      .catch((error) => setNotice(toMessage(error)));
+  }, [startupVersionsRefreshDone, state]);
+
+  // Listen for fresh version data pushed from the backend.
+  useEffect(() => {
+    const unlisten = onVersionsRefreshed((versions) => {
+      setState((current) => (current ? { ...current, versions } : current));
+    });
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, []);
 
   const instancesById = useMemo(() => {
     const map = new Map<string, InstalledInstance>();
@@ -460,8 +506,10 @@ export default function App() {
 
   async function onRefreshVersions() {
     await runWithBusy("versions", async () => {
-      const accelerators = await refreshAccelerators();
-      const versions = await refreshVersions();
+      const [accelerators, versions] = await Promise.all([
+        refreshAccelerators(),
+        refreshVersions(),
+      ]);
       setState((current) => (current ? { ...current, accelerators, versions } : current));
     }, "版本列表已刷新");
   }
@@ -733,6 +781,39 @@ export default function App() {
     setDeleteConfirmation(null);
   }
 
+  async function onIgnoreVersion(version: string) {
+    try {
+      const saved = await ignoreLauncherVersion(version);
+      setShowUpdatePrompt(false);
+      setDraft(saved);
+      setState((current) => (current ? { ...current, settings: saved } : current));
+      setNotice("已忽略该版本");
+    } catch (error) {
+      setNotice(toMessage(error));
+    }
+  }
+
+  async function handleCheckUpdate() {
+    await runWithBusy("checkUpdate", async () => {
+      try {
+        const info = await checkLauncherUpdate();
+        setUpdateInfo(info);
+        if (info.hasUpdate) {
+          const ignored = state?.settings.ignoredVersions ?? [];
+          if (!ignored.includes(info.latestVersion)) {
+            setShowUpdatePrompt(true);
+          } else {
+            setNotice(`已有新版本 ${info.latestVersion}，但已忽略`);
+          }
+        } else {
+          setNotice("已是最新版本");
+        }
+      } catch (error) {
+        setNotice(toMessage(error));
+      }
+    });
+  }
+
   function onOpenInstanceSettings(instance: InstalledInstance) {
     setEditingInstanceId(instance.id);
     setInstanceSettingsDraft({
@@ -815,15 +896,24 @@ export default function App() {
   return (
     <div className="app-shell">
       <div className="animated-backdrop" aria-hidden="true">
-        <img className="drift drift-a" src={coreSprite} alt="" />
-        <img className="drift drift-b" src={zenithSprite} alt="" />
-        <img className="drift drift-c" src={lancerSprite} alt="" />
-        <img className="drift drift-d" src={alphaSprite} alt="" />
-        <img className="tile-texture" src={basaltSprite} alt="" />
+        <div className="sector-plate sector-plate-a" />
+        <div className="sector-plate sector-plate-b" />
+        <div className="sector-plate sector-plate-c" />
+        <img className="backdrop-sprite core-base core-base-a" src={coreSprite} alt="" />
+        <img className="backdrop-sprite core-base core-base-b" src={coreSprite} alt="" />
+        <img className="backdrop-sprite turret-emplacement turret-emplacement-a" src={lancerSprite} alt="" />
+        <img className="backdrop-sprite turret-emplacement turret-emplacement-b" src={lancerSprite} alt="" />
+        <img className="backdrop-sprite unit-drift unit-alpha-a" src={alphaSprite} alt="" />
+        <img className="backdrop-sprite unit-drift unit-alpha-b" src={alphaSprite} alt="" />
+        <img className="backdrop-sprite unit-drift unit-zenith-a" src={zenithSprite} alt="" />
+        <img className="backdrop-sprite unit-drift unit-zenith-b" src={zenithSprite} alt="" />
       </div>
       <aside className="sidebar">
         <div className="brand">
-          <div className="brand-mark"><img src={coreSprite} alt="" /></div>
+          <div className="brand-mark">
+            <img className="brand-core" src={coreSprite} alt="" />
+            <img className="brand-unit" src={alphaSprite} alt="" />
+          </div>
           <div>
             <strong>Mindustry</strong>
             <span>Launcher</span>
@@ -905,8 +995,10 @@ export default function App() {
             <div className="version-list">
               {installedInstances.length === 0 ? (
                 <div className="empty-state game-empty">
-                  <div className="empty-visual">
-                    <Play size={34} />
+                  <div className="empty-visual mindustry-visual">
+                    <img className="empty-core" src={coreSprite} alt="" />
+                    <img className="empty-alpha" src={alphaSprite} alt="" />
+                    <img className="empty-zenith" src={zenithSprite} alt="" />
                   </div>
                   <div className="empty-copy">
                     <strong>暂无已安装游戏</strong>
@@ -925,9 +1017,7 @@ export default function App() {
                   return (
                     <article className="version-row game-row" key={instance.id}>
                       <div className="version-main">
-                        <span className={`channel-badge ${instance.channel}`}>
-                          {channelLabels[instance.channel]}
-                        </span>
+                        <ChannelBadge channel={instance.channel} />
                         <div>
                           <h2>{instance.version}</h2>
                           <div className="version-meta">
@@ -1036,9 +1126,7 @@ export default function App() {
                   return (
                     <article className="version-row" key={version.id}>
                       <div className="version-main">
-                        <span className={`channel-badge ${version.channel}`}>
-                          {channelLabels[version.channel]}
-                        </span>
+                        <ChannelBadge channel={version.channel} />
                         <div>
                           <h2>{version.name || version.tag}</h2>
                           <div className="version-meta">
@@ -1115,6 +1203,8 @@ export default function App() {
             onOpenInstallRoot={() => {
               void runWithBusy("openRoot", openInstallRoot);
             }}
+            onCheckUpdate={handleCheckUpdate}
+            updateInfo={updateInfo}
           />
         )}
         {runtimeGuideOpen && state && (
@@ -1171,6 +1261,13 @@ export default function App() {
             <span>{toastMessage.text}</span>
           </div>
         </div>
+      )}
+      {showUpdatePrompt && updateInfo && (
+        <UpdatePromptModal
+          info={updateInfo}
+          onClose={() => setShowUpdatePrompt(false)}
+          onIgnore={onIgnoreVersion}
+        />
       )}
     </div>
   );
@@ -1340,6 +1437,8 @@ function SettingsView(props: {
   runtimeConflicts: RuntimeConflict[];
   onPickInstallRoot: () => void;
   onOpenInstallRoot: () => void;
+  onCheckUpdate: () => void;
+  updateInfo: LauncherUpdateInfo | null;
 }) {
   const { state, draft } = props;
   if (!draft) {
@@ -1455,6 +1554,31 @@ function SettingsView(props: {
             onReinstall={props.onReinstallRuntime}
             onDelete={props.onDeleteRuntime}
           />
+
+        <div className="setting-row">
+          <label>启动器版本</label>
+          <div className="version-info">
+            <span>当前版本 {props.updateInfo?.currentVersion ?? "未知"}</span>
+            {props.updateInfo?.hasUpdate && (
+              <span className="update-available">新版本 {props.updateInfo.latestVersion}</span>
+            )}
+            {props.updateInfo && !props.updateInfo.hasUpdate && (
+              <span className="up-to-date">已是最新</span>
+            )}
+            <button
+              className="secondary-button"
+              onClick={props.onCheckUpdate}
+              disabled={props.busy === "checkUpdate"}
+            >
+              {props.busy === "checkUpdate" ? (
+                <Loader2 className="spin" size={14} />
+              ) : (
+                <RefreshCcw size={14} />
+              )}
+              <span>检查更新</span>
+            </button>
+          </div>
+        </div>
 
         <button className="save-button" onClick={props.onSave} disabled={props.busy === "settings"}>
           {props.busy === "settings" ? <Loader2 className="spin" size={17} /> : <Save size={17} />}
@@ -1676,6 +1800,15 @@ function RuntimeSettingsCard(props: {
   );
 }
 
+function ChannelBadge(props: { channel: GameChannel }) {
+  return (
+    <span className={`channel-badge ${props.channel}`}>
+      <img src={channelSprites[props.channel]} alt="" />
+      <span>{channelLabels[props.channel]}</span>
+    </span>
+  );
+}
+
 function ChannelStrip(props: {
   settings: Settings | null;
   busy: boolean;
@@ -1704,7 +1837,9 @@ function ChannelStrip(props: {
               disabled={props.busy}
               onClick={() => props.onToggle(item.key, !checked)}
             >
-              <span className={`channel-dot ${item.channel}`} />
+              <span className={`channel-dot ${item.channel}`}>
+                <img src={channelSprites[item.channel]} alt="" />
+              </span>
               <span>{item.label}</span>
             </button>
           );
@@ -2000,9 +2135,6 @@ function RuntimeGuide(props: {
   return (
     <div className="modal-layer" role="dialog" aria-modal="true">
       <div className="runtime-guide">
-        <button className="modal-close" title="关闭" onClick={props.onClose}>
-          <X size={17} />
-        </button>
         <div className="guide-visual">
           <img src={coreSprite} alt="" />
           <img src={alphaSprite} alt="" />
@@ -2039,7 +2171,7 @@ function RuntimeGuide(props: {
             <FileUp size={17} />
             <span>去设置导入</span>
           </button>
-          <button className="ghost-button" onClick={props.onDismiss}>
+          <button className="ghost-button guide-dismiss" onClick={props.onDismiss}>
             无需理会
           </button>
         </div>
@@ -2106,6 +2238,57 @@ function DeleteConfirmModal(props: {
             {props.busy ? <Loader2 className="spin" size={17} /> : <Trash2 size={17} />}
             <span>确认删除</span>
           </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function UpdatePromptModal(props: {
+  info: LauncherUpdateInfo;
+  onClose: () => void;
+  onIgnore: (version: string) => void;
+}) {
+  return (
+    <div className="modal-layer" role="dialog" aria-modal="true">
+      <div className="update-prompt-modal">
+        <button className="modal-close" title="关闭" onClick={props.onClose}>
+          <X size={17} />
+        </button>
+        <div className="update-prompt-head">
+          <span>
+            <Download size={20} />
+          </span>
+          <div>
+            <h2>发现新版本 {props.info.latestVersion}</h2>
+            <p>当前版本 {props.info.currentVersion}</p>
+          </div>
+        </div>
+        {props.info.releaseBody && (
+          <div className="update-prompt-body">
+            <span className="update-prompt-body-label">更新内容</span>
+            <div className="update-prompt-body-content">{props.info.releaseBody}</div>
+          </div>
+        )}
+        <div className="modal-actions">
+          <button className="secondary-button" onClick={() => props.onIgnore(props.info.latestVersion)}>
+            <Ban size={15} />
+            <span>忽略此版本</span>
+          </button>
+          <button className="secondary-button" onClick={props.onClose}>
+            稍后再说
+          </button>
+          {props.info.releaseUrl && (
+            <a
+              className="action-button"
+              href={props.info.releaseUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              <Download size={17} />
+              <span>前往下载</span>
+            </a>
+          )}
         </div>
       </div>
     </div>
