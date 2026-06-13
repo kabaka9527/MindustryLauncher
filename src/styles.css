@@ -1487,6 +1487,10 @@ select:focus {
 .version-info .up-to-date {
   color: var(--color-success);
 }
+.version-info .update-error {
+  color: #b45309;
+  cursor: help;
+}
 
 /* ===================================================================
    Save button
@@ -2336,53 +2340,75 @@ select:focus {
 .update-prompt-modal {
   position: relative;
   display: grid;
-  gap: 14px;
+  gap: 16px;
   width: min(520px, 100%);
-  padding: 26px;
+  padding: 28px;
   border: 1px solid var(--color-modal-border);
-  border-radius: 8px;
+  border-radius: 10px;
   color: var(--color-text-primary);
   background:
-    linear-gradient(135deg, rgba(255, 255, 255, 0.96), rgba(242, 247, 246, 0.96)),
+    linear-gradient(160deg, rgba(255, 255, 255, 0.97), rgba(242, 247, 246, 0.97)),
     var(--color-modal-bg);
   box-shadow: 0 24px 70px rgba(14, 28, 35, 0.28);
 }
 
 [data-theme="dark"] .update-prompt-modal {
   background:
-    linear-gradient(135deg, rgba(26, 33, 39, 0.98), rgba(22, 29, 35, 0.98)),
+    linear-gradient(160deg, rgba(26, 33, 39, 0.98), rgba(22, 29, 35, 0.98)),
     var(--color-modal-bg);
   box-shadow: 0 24px 70px rgba(0, 0, 0, 0.45);
 }
 
 .update-prompt-head {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  gap: 12px;
-  padding-right: 34px;
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
 }
 
-.update-prompt-head > span {
+.update-prompt-icon {
   display: grid;
   place-items: center;
-  width: 38px;
-  height: 38px;
-  border-radius: 8px;
-  color: var(--color-accent);
-  background: var(--color-chip-ok);
+  flex-shrink: 0;
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  color: #2f8b7d;
+  background: #dff3e6;
 }
 
-.update-prompt-head h2 {
+[data-theme="dark"] .update-prompt-icon {
+  color: #7ecfaa;
+  background: #1e3630;
+}
+
+.update-prompt-head-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.update-prompt-head-text h2 {
   margin: 0;
-  font-size: 22px;
-  letter-spacing: 0;
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: -0.2px;
   color: var(--color-text-heading);
+  line-height: 1.3;
 }
 
-.update-prompt-head p {
-  margin: 0;
-  color: var(--color-text-secondary);
-  line-height: 1.6;
+.update-prompt-version {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--color-accent-teal);
+}
+
+.update-prompt-current {
+  margin-top: 2px;
+  font-size: 13px;
+  color: var(--color-text-muted);
 }
 
 .update-prompt-body {
@@ -2401,14 +2427,27 @@ select:focus {
 .update-prompt-body-content {
   max-height: 200px;
   overflow-y: auto;
-  padding: 10px 12px;
-  border: 1px solid var(--color-progress-track);
-  border-radius: 7px;
+  padding: 12px 14px;
+  border: 1px solid var(--color-border-light);
+  border-radius: 8px;
   background: var(--color-surface-input);
   color: var(--color-text-label);
   font-size: 13px;
-  line-height: 1.6;
+  line-height: 1.7;
   white-space: pre-wrap;
   overflow-wrap: break-word;
+}
+
+.update-prompt-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding-top: 4px;
+  border-top: 1px solid var(--color-border-light);
+}
+
+.update-prompt-actions .action-button {
+  margin-left: auto;
 }
 

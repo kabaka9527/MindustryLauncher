@@ -6,6 +6,8 @@ use crate::{
     runtime,
 };
 use chrono::Utc;
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -253,6 +255,29 @@ fn open_path(path: &Path) -> AppResult<()> {
     command
         .spawn()
         .map_err(|err| AppError::Command(format!("failed to open {}: {err}", path.display())))?;
+    Ok(())
+}
+
+pub fn open_url(url: &str) -> AppResult<()> {
+    let mut command = if cfg!(target_os = "windows") {
+        let mut command = std::process::Command::new("cmd");
+        command.args(["/c", "start", "", url]);
+        #[cfg(windows)]
+        command.creation_flags(0x08000000); // CREATE_NO_WINDOW
+        command
+    } else if cfg!(target_os = "macos") {
+        let mut command = std::process::Command::new("open");
+        command.arg(url);
+        command
+    } else {
+        let mut command = std::process::Command::new("xdg-open");
+        command.arg(url);
+        command
+    };
+
+    command
+        .spawn()
+        .map_err(|err| AppError::Command(format!("failed to open url {url}: {err}")))?;
     Ok(())
 }
 

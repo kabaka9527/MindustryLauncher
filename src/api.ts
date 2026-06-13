@@ -118,6 +118,10 @@ export function openInstallRoot() {
   return invoke<void>("open_install_root");
 }
 
+export function openUrl(url: string) {
+  return invoke<void>("open_url", { url });
+}
+
 export function readDebugLog() {
   return invoke<DebugLogSnapshot>("read_debug_log");
 }

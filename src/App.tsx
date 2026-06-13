@@ -44,6 +44,7 @@ import {
   openDebugLogDir,
   migrateInstallRoot,
   openInstallRoot,
+  openUrl,
   pauseDownload,
   readDebugLog,
   refreshAccelerators,
@@ -233,6 +234,8 @@ export default function App() {
           if (!ignored.includes(info.latestVersion)) {
             setShowUpdatePrompt(true);
           }
+        } else if (info.errorMessage) {
+          setNotice(info.errorMessage);
         }
       })
       .catch(() => {});
@@ -799,12 +802,9 @@ export default function App() {
         const info = await checkLauncherUpdate();
         setUpdateInfo(info);
         if (info.hasUpdate) {
-          const ignored = state?.settings.ignoredVersions ?? [];
-          if (!ignored.includes(info.latestVersion)) {
-            setShowUpdatePrompt(true);
-          } else {
-            setNotice(`已有新版本 ${info.latestVersion}，但已忽略`);
-          }
+          setShowUpdatePrompt(true);
+        } else if (info.errorMessage) {
+          setNotice(info.errorMessage);
         } else {
           setNotice("已是最新版本");
         }
@@ -1562,8 +1562,11 @@ function SettingsView(props: {
             {props.updateInfo?.hasUpdate && (
               <span className="update-available">新版本 {props.updateInfo.latestVersion}</span>
             )}
-            {props.updateInfo && !props.updateInfo.hasUpdate && (
+            {props.updateInfo && !props.updateInfo.hasUpdate && !props.updateInfo.errorMessage && (
               <span className="up-to-date">已是最新</span>
+            )}
+            {props.updateInfo?.errorMessage && (
+              <span className="update-error" title={props.updateInfo.errorMessage}>检查失败</span>
             )}
             <button
               className="secondary-button"
@@ -2252,16 +2255,14 @@ function UpdatePromptModal(props: {
   return (
     <div className="modal-layer" role="dialog" aria-modal="true">
       <div className="update-prompt-modal">
-        <button className="modal-close" title="关闭" onClick={props.onClose}>
-          <X size={17} />
-        </button>
         <div className="update-prompt-head">
-          <span>
+          <span className="update-prompt-icon">
             <Download size={20} />
           </span>
-          <div>
-            <h2>发现新版本 {props.info.latestVersion}</h2>
-            <p>当前版本 {props.info.currentVersion}</p>
+          <div className="update-prompt-head-text">
+            <h2>发现新版本</h2>
+            <span className="update-prompt-version">{props.info.latestVersion}</span>
+            <span className="update-prompt-current">当前版本 {props.info.currentVersion}</span>
           </div>
         </div>
         {props.info.releaseBody && (
@@ -2270,24 +2271,22 @@ function UpdatePromptModal(props: {
             <div className="update-prompt-body-content">{props.info.releaseBody}</div>
           </div>
         )}
-        <div className="modal-actions">
-          <button className="secondary-button" onClick={() => props.onIgnore(props.info.latestVersion)}>
+        <div className="update-prompt-actions">
+          <button className="ghost-button" onClick={() => props.onIgnore(props.info.latestVersion)}>
             <Ban size={15} />
             <span>忽略此版本</span>
           </button>
-          <button className="secondary-button" onClick={props.onClose}>
+          <button className="ghost-button" onClick={props.onClose}>
             稍后再说
           </button>
           {props.info.releaseUrl && (
-            <a
+            <button
               className="action-button"
-              href={props.info.releaseUrl}
-              target="_blank"
-              rel="noopener noreferrer"
+              onClick={() => openUrl(props.info.releaseUrl)}
             >
               <Download size={17} />
               <span>前往下载</span>
-            </a>
+            </button>
           )}
         </div>
       </div>

@@ -214,4 +214,5 @@ export type LauncherUpdateInfo = {
   hasUpdate: boolean;
   releaseUrl: string;
   releaseBody: string;
+  errorMessage?: string | null;
 };

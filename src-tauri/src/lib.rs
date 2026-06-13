@@ -275,6 +275,11 @@ async fn open_install_root(state: State<'_, LauncherState>) -> AppResult<()> {
 }
 
 #[tauri::command(rename_all = "camelCase")]
+fn open_url(url: String) -> AppResult<()> {
+    launcher::open_url(&url)
+}
+
+#[tauri::command(rename_all = "camelCase")]
 fn read_debug_log() -> AppResult<DebugLogSnapshot> {
     debug_console::snapshot(600)
 }
@@ -395,6 +400,7 @@ pub fn run() {
             migrate_install_root,
             delete_instance,
             open_install_root,
+            open_url,
             read_debug_log,
             clear_debug_log,
             open_debug_log_dir,

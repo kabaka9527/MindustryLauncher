@@ -375,6 +375,7 @@ pub struct LauncherUpdateInfo {
     pub has_update: bool,
     pub release_url: String,
     pub release_body: String,
+    pub error_message: Option<String>,
 }
 
 #[cfg(test)]
