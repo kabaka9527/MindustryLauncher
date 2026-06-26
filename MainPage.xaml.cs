@@ -33,6 +33,7 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
     {
         InitializeComponent();
         DataContext = this;
+        KeyboardAcceleratorPlacementMode = KeyboardAcceleratorPlacementMode.Hidden;
         _launcher.TaskChanged += OnTaskChanged;
         RegisterKeyboardAccelerators();
     }
@@ -746,6 +747,8 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
         }
     }
 
+    private CancellationTokenSource? _noticeCts;
+
     private void SetNotice(string text)
     {
         NoticeText.Text = text;
@@ -756,6 +759,17 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
                 : text.Contains("正在", StringComparison.Ordinal)
                     ? InfoBarSeverity.Informational
                     : InfoBarSeverity.Success;
+
+        _noticeCts?.Cancel();
+        _noticeCts = new CancellationTokenSource();
+        var token = _noticeCts.Token;
+        _ = Task.Delay(5000, token).ContinueWith(_ =>
+        {
+            if (!token.IsCancellationRequested)
+            {
+                DispatcherQueue.TryEnqueue(() => NoticeInfoBar.IsOpen = false);
+            }
+        }, TaskContinuationOptions.NotOnCanceled);
     }
 
     private void RefreshDebugLog()

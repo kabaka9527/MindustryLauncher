@@ -16,6 +16,7 @@
     <Nullable>enable</Nullable>
     <Version>0.1.1</Version>
     <ApplicationTitle>Mindustry Launcher</ApplicationTitle>
+    <ApplicationIcon>Assets\AppIcon.ico</ApplicationIcon>
     <NuGetAudit>false</NuGetAudit>
   </PropertyGroup>
 
@@ -27,7 +28,7 @@
     <Content Include="Assets\Square44x44Logo.targetsize-24_altform-unplated.png" />
     <Content Include="Assets\Square44x44Logo.targetsize-48_altform-lightunplated.png" />
     <Content Include="Assets\StoreLogo.png" />
-    <Content Include="Assets\AppIcon.ico" />
+
     <Content Include="Assets\Wide310x150Logo.scale-200.png" />
     <Content Include="Assets\Mindustry\*.png" />
   </ItemGroup>
