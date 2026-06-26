@@ -1,0 +1,662 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<Page
+    x:Class="MindustryLauncher.MainPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d"
+    Loaded="OnLoaded"
+    SizeChanged="OnPageSizeChanged">
+
+    <NavigationView
+        x:Name="RootNavigation"
+        AutomationProperties.Name="主导航"
+        IsBackButtonVisible="Collapsed"
+        IsSettingsVisible="False"
+        PaneDisplayMode="Auto"
+        PaneTitle="Mindustry Launcher"
+        SelectionChanged="OnNavigationSelectionChanged">
+        <NavigationView.MenuItems>
+            <NavigationViewItem Content="游戏" Icon="Play" IsSelected="True" Tag="games" />
+            <NavigationViewItem Content="版本" Icon="Download" Tag="versions" />
+            <NavigationViewItem Content="设置" Icon="Setting" Tag="settings" />
+            <NavigationViewItem Content="调试" Icon="Repair" Tag="debug" />
+        </NavigationView.MenuItems>
+
+        <Grid x:Name="ContentRoot" Padding="{ThemeResource LauncherPagePadding}">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <StackPanel x:Name="PageHeader" HorizontalAlignment="Left" Spacing="6">
+                <TextBlock x:Name="PageTitleText" Style="{StaticResource LauncherPageTitleTextBlockStyle}" Text="游戏" />
+                <TextBlock x:Name="PageSubtitleText" Style="{StaticResource LauncherCaptionTextBlockStyle}" Text="管理已安装实例并启动游戏" />
+            </StackPanel>
+
+            <InfoBar
+                x:Name="NoticeInfoBar"
+                Grid.Row="1"
+                AutomationProperties.LiveSetting="Polite"
+                AutomationProperties.Name="状态消息"
+                HorizontalAlignment="Left"
+                Margin="0,12,0,12"
+                IsOpen="True"
+                Severity="Informational">
+                <TextBlock x:Name="NoticeText" Text="正在读取本地状态" TextWrapping="WrapWholeWords" />
+            </InfoBar>
+
+            <Grid Grid.Row="2">
+                <ScrollViewer
+                    x:Name="GamesView"
+                    HorizontalScrollBarVisibility="Disabled"
+                    HorizontalScrollMode="Disabled"
+                    VerticalScrollBarVisibility="Auto">
+                    <Grid x:Name="GamesPanel" HorizontalAlignment="Left" MaxWidth="{ThemeResource LauncherContentMaxWidth}" RowSpacing="16">
+                        <Grid.ChildrenTransitions>
+                            <TransitionCollection>
+                                <EntranceThemeTransition />
+                                <RepositionThemeTransition />
+                            </TransitionCollection>
+                        </Grid.ChildrenTransitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+
+                        <Grid x:Name="MetricsGrid" ColumnSpacing="12" RowSpacing="12">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+
+                            <Border x:Name="InstalledMetricCard" Style="{StaticResource LauncherQuietCardBorderStyle}">
+                                <Grid ColumnSpacing="12">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <FontIcon FontSize="22" Glyph="&#xE7F4;" Foreground="{ThemeResource LauncherAccentBrush}" />
+                                    <StackPanel Grid.Column="1" Spacing="2">
+                                        <TextBlock Style="{StaticResource LauncherCaptionTextBlockStyle}" Text="已安装" />
+                                        <TextBlock x:Name="InstalledMetricValue" FontSize="20" FontWeight="SemiBold" Text="0" />
+                                    </StackPanel>
+                                </Grid>
+                            </Border>
+
+                            <Border x:Name="RuntimeMetricCard" Grid.Column="1" Style="{StaticResource LauncherQuietCardBorderStyle}">
+                                <Grid ColumnSpacing="12">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <FontIcon FontSize="22" Glyph="&#xE950;" Foreground="{ThemeResource LauncherAccentBrush}" />
+                                    <StackPanel Grid.Column="1" Spacing="2">
+                                        <TextBlock Style="{StaticResource LauncherCaptionTextBlockStyle}" Text="运行时" />
+                                        <TextBlock x:Name="RuntimeMetricValue" FontSize="20" FontWeight="SemiBold" Text="0" />
+                                    </StackPanel>
+                                </Grid>
+                            </Border>
+
+                            <Border x:Name="InstallRootMetricCard" Grid.Column="2" Style="{StaticResource LauncherQuietCardBorderStyle}">
+                                <Grid ColumnSpacing="12">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <FontIcon FontSize="22" Glyph="&#xE838;" Foreground="{ThemeResource LauncherAccentBrush}" />
+                                    <StackPanel Grid.Column="1" Spacing="2">
+                                        <TextBlock Style="{StaticResource LauncherCaptionTextBlockStyle}" Text="安装目录" />
+                                        <TextBlock
+                                            x:Name="InstallRootMetricValue"
+                                            FontSize="20"
+                                            FontWeight="SemiBold"
+                                            Text="-"
+                                            TextTrimming="CharacterEllipsis"
+                                            TextWrapping="NoWrap" />
+                                    </StackPanel>
+                                </Grid>
+                            </Border>
+                        </Grid>
+
+                        <CommandBar
+                            x:Name="GamesCommandBar"
+                            Grid.Row="1"
+                            DefaultLabelPosition="Right"
+                            HorizontalAlignment="Stretch"
+                            IsOpen="False">
+                            <CommandBar.Content>
+                                <TextBlock Style="{StaticResource LauncherSectionTitleTextBlockStyle}" Text="已安装" />
+                            </CommandBar.Content>
+                            <AppBarButton Click="OnRefreshAllClick" Label="刷新">
+                                <AppBarButton.Icon>
+                                    <SymbolIcon Symbol="Refresh" />
+                                </AppBarButton.Icon>
+                            </AppBarButton>
+                            <AppBarButton Click="OnOpenInstallRootClick" Label="打开目录">
+                                <AppBarButton.Icon>
+                                    <SymbolIcon Symbol="OpenFile" />
+                                </AppBarButton.Icon>
+                            </AppBarButton>
+                            <AppBarButton Click="OnCheckUpdateClick" Label="检查更新">
+                                <AppBarButton.Icon>
+                                    <SymbolIcon Symbol="Sync" />
+                                </AppBarButton.Icon>
+                            </AppBarButton>
+                        </CommandBar>
+
+                        <Grid Grid.Row="2">
+                            <ListView
+                                x:Name="InstancesList"
+                                ItemContainerStyle="{StaticResource LauncherListViewItemStyle}"
+                                ItemsSource="{Binding InstalledInstances}"
+                                SelectionMode="None">
+                                <ListView.ItemTemplate>
+                                    <DataTemplate>
+                                        <Border Style="{StaticResource LauncherCardBorderStyle}">
+                                            <Grid ColumnSpacing="14" RowSpacing="12">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="Auto" />
+                                                    <ColumnDefinition Width="*" />
+                                                </Grid.ColumnDefinitions>
+                                                <Grid.RowDefinitions>
+                                                    <RowDefinition Height="Auto" />
+                                                    <RowDefinition Height="Auto" />
+                                                </Grid.RowDefinitions>
+                                                <Image
+                                                    Grid.RowSpan="2"
+                                                    Width="54"
+                                                    Height="54"
+                                                    AutomationProperties.Name="{Binding ChannelDisplayName}"
+                                                    Source="{Binding ChannelImagePath}"
+                                                    Stretch="Uniform" />
+                                                <StackPanel Grid.Column="1" Spacing="4">
+                                                    <TextBlock FontSize="18" FontWeight="SemiBold" Text="{Binding Version}" TextWrapping="WrapWholeWords" />
+                                                    <TextBlock Style="{StaticResource LauncherCaptionTextBlockStyle}" Text="{Binding ChannelDisplayName}" />
+                                                    <TextBlock Style="{StaticResource LauncherCaptionTextBlockStyle}" Text="{Binding InstalledDisplay}" />
+                                                </StackPanel>
+                                                <CommandBar
+                                                    Grid.Row="1"
+                                                    Grid.Column="1"
+                                                    DefaultLabelPosition="Collapsed"
+                                                    HorizontalAlignment="Left"
+                                                    IsOpen="False"
+                                                    OverflowButtonVisibility="Collapsed">
+                                                    <AppBarButton Click="OnLaunchInstanceClick" Label="启动" Tag="{Binding}">
+                                                        <AppBarButton.Icon>
+                                                            <SymbolIcon Symbol="Play" />
+                                                        </AppBarButton.Icon>
+                                                    </AppBarButton>
+                                                    <AppBarButton Click="OnEditInstanceClick" Label="参数" Tag="{Binding}">
+                                                        <AppBarButton.Icon>
+                                                            <SymbolIcon Symbol="Edit" />
+                                                        </AppBarButton.Icon>
+                                                    </AppBarButton>
+                                                    <AppBarButton Click="OnDeleteInstanceClick" Label="删除" Tag="{Binding}">
+                                                        <AppBarButton.Icon>
+                                                            <SymbolIcon Symbol="Delete" />
+                                                        </AppBarButton.Icon>
+                                                    </AppBarButton>
+                                                </CommandBar>
+                                            </Grid>
+                                        </Border>
+                                    </DataTemplate>
+                                </ListView.ItemTemplate>
+                            </ListView>
+
+                            <Border
+                                x:Name="InstancesEmptyState"
+                                AutomationProperties.Name="没有已安装版本"
+                                MinHeight="150"
+                                Style="{StaticResource LauncherCardBorderStyle}"
+                                Visibility="Collapsed">
+                                <StackPanel
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center"
+                                    MaxWidth="420"
+                                    Spacing="6">
+                                    <FontIcon FontSize="24" Glyph="&#xE7F4;" Foreground="{ThemeResource LauncherAccentBrush}" />
+                                    <TextBlock FontSize="18" FontWeight="SemiBold" Text="还没有安装的版本" TextAlignment="Center" TextWrapping="WrapWholeWords" />
+                                    <TextBlock Style="{StaticResource LauncherCaptionTextBlockStyle}" Text="在“版本”页选择一个可用版本安装。" TextAlignment="Center" />
+                                    <Button Click="OnGoToVersionsClick" HorizontalAlignment="Center">
+                                        <StackPanel Orientation="Horizontal" Spacing="8">
+                                            <SymbolIcon Symbol="Download" />
+                                            <TextBlock Text="查看版本" />
+                                        </StackPanel>
+                                    </Button>
+                                </StackPanel>
+                            </Border>
+                        </Grid>
+                    </Grid>
+                </ScrollViewer>
+
+                <ScrollViewer
+                    x:Name="VersionsView"
+                    HorizontalScrollBarVisibility="Disabled"
+                    HorizontalScrollMode="Disabled"
+                    Visibility="Collapsed"
+                    VerticalScrollBarVisibility="Auto">
+                    <Grid x:Name="VersionsPanel" HorizontalAlignment="Left" MaxWidth="{ThemeResource LauncherContentMaxWidth}" RowSpacing="16">
+                        <Grid.ChildrenTransitions>
+                            <TransitionCollection>
+                                <EntranceThemeTransition />
+                                <RepositionThemeTransition />
+                            </TransitionCollection>
+                        </Grid.ChildrenTransitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+
+                        <CommandBar
+                            x:Name="VersionsCommandBar"
+                            DefaultLabelPosition="Right"
+                            HorizontalAlignment="Stretch"
+                            IsOpen="False">
+                            <CommandBar.Content>
+                                <TextBlock Style="{StaticResource LauncherSectionTitleTextBlockStyle}" Text="版本源" />
+                            </CommandBar.Content>
+                            <AppBarButton Click="OnRefreshVersionsClick" Label="刷新版本">
+                                <AppBarButton.Icon>
+                                    <SymbolIcon Symbol="Refresh" />
+                                </AppBarButton.Icon>
+                            </AppBarButton>
+                            <AppBarButton Click="OnToggleBeClick" Label="BE 频道">
+                                <AppBarButton.Icon>
+                                    <SymbolIcon Symbol="World" />
+                                </AppBarButton.Icon>
+                            </AppBarButton>
+                        </CommandBar>
+
+                        <Grid x:Name="ChannelGrid" Grid.Row="1" ColumnSpacing="8" RowSpacing="8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+                            <Button x:Name="MindustryChannelButton" AutomationProperties.HelpText="显示 Mindustry 稳定版" Click="OnChannelClick" HorizontalAlignment="Stretch" Tag="mindustry">
+                                <TextBlock Text="Mindustry" TextTrimming="CharacterEllipsis" />
+                            </Button>
+                            <Button x:Name="MindustryXChannelButton" Grid.Column="1" AutomationProperties.HelpText="显示 MindustryX 稳定版" Click="OnChannelClick" HorizontalAlignment="Stretch" Tag="mindustryX">
+                                <TextBlock Text="MindustryX" TextTrimming="CharacterEllipsis" />
+                            </Button>
+                            <Button x:Name="MindustryBeChannelButton" Grid.Column="2" AutomationProperties.HelpText="显示 Mindustry BE 频道" Click="OnChannelClick" HorizontalAlignment="Stretch" Tag="mindustryBE">
+                                <TextBlock Text="Mindustry BE" TextTrimming="CharacterEllipsis" />
+                            </Button>
+                            <Button x:Name="MindustryXBeChannelButton" Grid.Column="3" AutomationProperties.HelpText="显示 MindustryX BE 频道" Click="OnChannelClick" HorizontalAlignment="Stretch" Tag="mindustryXBE">
+                                <TextBlock Text="MindustryX BE" TextTrimming="CharacterEllipsis" />
+                            </Button>
+                        </Grid>
+
+                        <Grid Grid.Row="2">
+                            <ListView
+                                x:Name="VersionsList"
+                                ItemContainerStyle="{StaticResource LauncherListViewItemStyle}"
+                                ItemsSource="{Binding VisibleVersions}"
+                                SelectionMode="None">
+                                <ListView.ItemTemplate>
+                                    <DataTemplate>
+                                        <Border Style="{StaticResource LauncherCardBorderStyle}">
+                                            <Grid ColumnSpacing="14" MinHeight="72">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="Auto" />
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <Image
+                                                    Width="46"
+                                                    Height="46"
+                                                    VerticalAlignment="Center"
+                                                    AutomationProperties.Name="{Binding ChannelDisplayName}"
+                                                    Source="{Binding ChannelImagePath}"
+                                                    Stretch="Uniform" />
+                                                <Grid Grid.Column="1" VerticalAlignment="Center" RowSpacing="4">
+                                                    <Grid.RowDefinitions>
+                                                        <RowDefinition Height="Auto" />
+                                                        <RowDefinition Height="Auto" />
+                                                    </Grid.RowDefinitions>
+                                                    <TextBlock
+                                                        FontSize="17"
+                                                        FontWeight="SemiBold"
+                                                        Text="{Binding DisplayName}"
+                                                        TextTrimming="CharacterEllipsis"
+                                                        TextWrapping="NoWrap" />
+                                                    <TextBlock
+                                                        Grid.Row="1"
+                                                        Style="{StaticResource LauncherCaptionTextBlockStyle}"
+                                                        Text="{Binding SummaryDisplay}"
+                                                        TextTrimming="CharacterEllipsis"
+                                                        TextWrapping="NoWrap" />
+                                                </Grid>
+                                                <Button
+                                                    Grid.Column="2"
+                                                    Click="OnInstallVersionClick"
+                                                    HorizontalAlignment="Right"
+                                                    VerticalAlignment="Center"
+                                                    IsEnabled="{Binding CanInstall}"
+                                                    MinWidth="88"
+                                                    Tag="{Binding}">
+                                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                                        <SymbolIcon Symbol="Download" />
+                                                        <TextBlock Text="{Binding PrimaryActionLabel}" />
+                                                    </StackPanel>
+                                                </Button>
+                                            </Grid>
+                                        </Border>
+                                    </DataTemplate>
+                                </ListView.ItemTemplate>
+                            </ListView>
+
+                            <Border
+                                x:Name="VersionsEmptyState"
+                                AutomationProperties.Name="没有可显示版本"
+                                MinHeight="128"
+                                Style="{StaticResource LauncherCardBorderStyle}"
+                                Visibility="Collapsed">
+                                <StackPanel
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center"
+                                    MaxWidth="460"
+                                    Spacing="6">
+                                    <FontIcon FontSize="24" Glyph="&#xE896;" Foreground="{ThemeResource LauncherAccentBrush}" />
+                                    <TextBlock FontSize="18" FontWeight="SemiBold" Text="当前频道没有可显示的版本" TextAlignment="Center" TextWrapping="WrapWholeWords" />
+                                    <TextBlock Style="{StaticResource LauncherCaptionTextBlockStyle}" Text="可切换频道或刷新版本源。" TextAlignment="Center" />
+                                </StackPanel>
+                            </Border>
+                        </Grid>
+                    </Grid>
+                </ScrollViewer>
+
+                <ScrollViewer
+                    x:Name="SettingsView"
+                    HorizontalScrollBarVisibility="Disabled"
+                    HorizontalScrollMode="Disabled"
+                    Visibility="Collapsed"
+                    VerticalScrollBarVisibility="Auto">
+                    <Grid x:Name="SettingsPanel" HorizontalAlignment="Left" MaxWidth="{ThemeResource LauncherContentMaxWidth}" RowSpacing="16">
+                        <Grid.ChildrenTransitions>
+                            <TransitionCollection>
+                                <EntranceThemeTransition />
+                                <RepositionThemeTransition />
+                            </TransitionCollection>
+                        </Grid.ChildrenTransitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+
+                        <Grid x:Name="SettingsTopGrid" ColumnSpacing="16" RowSpacing="16">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+
+                            <Border x:Name="AppearanceCard" Style="{StaticResource LauncherCardBorderStyle}">
+                                <StackPanel Spacing="14">
+                                    <TextBlock Style="{StaticResource LauncherSectionTitleTextBlockStyle}" Text="外观" />
+                                    <ComboBox
+                                        x:Name="ThemeCombo"
+                                        Header="主题"
+                                        HorizontalAlignment="Left"
+                                        MaxWidth="320"
+                                        SelectionChanged="OnThemeSelectionChanged">
+                                        <ComboBoxItem Content="跟随系统" Tag="system" />
+                                        <ComboBoxItem Content="浅色" Tag="light" />
+                                        <ComboBoxItem Content="深色" Tag="dark" />
+                                    </ComboBox>
+                                </StackPanel>
+                            </Border>
+
+                            <Border x:Name="InstallRootCard" Grid.Column="1" Style="{StaticResource LauncherCardBorderStyle}">
+                                <StackPanel Spacing="14">
+                                    <TextBlock Style="{StaticResource LauncherSectionTitleTextBlockStyle}" Text="安装目录" />
+                                    <TextBox
+                                        x:Name="InstallRootBox"
+                                        Header="目录"
+                                        HorizontalAlignment="Stretch"
+                                        MaxHeight="96"
+                                        MinHeight="64"
+                                        TextWrapping="Wrap" />
+                                    <CommandBar
+                                        x:Name="InstallRootCommandBar"
+                                        DefaultLabelPosition="Right"
+                                        HorizontalAlignment="Left"
+                                        IsOpen="False">
+                                        <AppBarButton Click="OnPickInstallRootClick" Label="选择">
+                                            <AppBarButton.Icon>
+                                                <SymbolIcon Symbol="Folder" />
+                                            </AppBarButton.Icon>
+                                        </AppBarButton>
+                                        <AppBarButton Click="OnMigrateInstallRootClick" Label="迁移">
+                                            <AppBarButton.Icon>
+                                                <SymbolIcon Symbol="MoveToFolder" />
+                                            </AppBarButton.Icon>
+                                        </AppBarButton>
+                                        <AppBarButton Click="OnOpenInstallRootClick" Label="打开">
+                                            <AppBarButton.Icon>
+                                                <SymbolIcon Symbol="OpenFile" />
+                                            </AppBarButton.Icon>
+                                        </AppBarButton>
+                                    </CommandBar>
+                                </StackPanel>
+                            </Border>
+                        </Grid>
+
+                        <Grid x:Name="SettingsBottomGrid" Grid.Row="1" ColumnSpacing="16" RowSpacing="16">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+
+                            <Border x:Name="NetworkCard" Style="{StaticResource LauncherCardBorderStyle}">
+                                <StackPanel Spacing="14">
+                                    <TextBlock Style="{StaticResource LauncherSectionTitleTextBlockStyle}" Text="网络" />
+                                    <ComboBox x:Name="AcceleratorCombo" Header="GitHub 加速源" DisplayMemberPath="DisplayName" SelectionChanged="OnAcceleratorSelectionChanged" />
+                                    <TextBox x:Name="GithubProxyBox" Header="自定义 GitHub 前缀" PlaceholderText="https://mirror.example/" TextWrapping="NoWrap" />
+                                    <TextBox x:Name="HttpProxyBox" Header="HTTP 代理" PlaceholderText="http://127.0.0.1:7890" TextWrapping="NoWrap" />
+                                    <CommandBar
+                                        x:Name="NetworkCommandBar"
+                                        DefaultLabelPosition="Right"
+                                        HorizontalAlignment="Left"
+                                        IsOpen="False">
+                                        <AppBarButton Click="OnSaveSettingsClick" Label="保存">
+                                            <AppBarButton.Icon>
+                                                <SymbolIcon Symbol="Save" />
+                                            </AppBarButton.Icon>
+                                        </AppBarButton>
+                                        <AppBarButton Click="OnRefreshAcceleratorsClick" Label="刷新加速源">
+                                            <AppBarButton.Icon>
+                                                <SymbolIcon Symbol="Refresh" />
+                                            </AppBarButton.Icon>
+                                        </AppBarButton>
+                                    </CommandBar>
+                                </StackPanel>
+                            </Border>
+
+                            <Border x:Name="RuntimeCard" Grid.Column="1" Style="{StaticResource LauncherCardBorderStyle}">
+                                <StackPanel Spacing="14">
+                                    <TextBlock Style="{StaticResource LauncherSectionTitleTextBlockStyle}" Text="运行时" />
+                                    <ComboBox x:Name="RemoteRuntimeCombo" Header="可下载 JRE" DisplayMemberPath="DisplayName" />
+                                    <CommandBar
+                                        x:Name="RuntimeCommandBar"
+                                        DefaultLabelPosition="Right"
+                                        HorizontalAlignment="Left"
+                                        IsOpen="False">
+                                        <AppBarButton Click="OnLoadRemoteRuntimesClick" Label="加载列表">
+                                            <AppBarButton.Icon>
+                                                <SymbolIcon Symbol="Refresh" />
+                                            </AppBarButton.Icon>
+                                        </AppBarButton>
+                                        <AppBarButton Click="OnInstallRuntimeClick" Label="下载">
+                                            <AppBarButton.Icon>
+                                                <SymbolIcon Symbol="Download" />
+                                            </AppBarButton.Icon>
+                                        </AppBarButton>
+                                        <AppBarButton Click="OnImportRuntimeClick" Label="导入">
+                                            <AppBarButton.Icon>
+                                                <SymbolIcon Symbol="Import" />
+                                            </AppBarButton.Icon>
+                                        </AppBarButton>
+                                        <AppBarButton Click="OnScanRuntimeClick" Label="扫描">
+                                            <AppBarButton.Icon>
+                                                <SymbolIcon Symbol="Find" />
+                                            </AppBarButton.Icon>
+                                        </AppBarButton>
+                                    </CommandBar>
+                                    <ListView
+                                        x:Name="RuntimesList"
+                                        ItemContainerStyle="{StaticResource LauncherListViewItemStyle}"
+                                        ItemsSource="{Binding Runtimes}"
+                                        SelectionMode="None">
+                                        <ListView.ItemTemplate>
+                                            <DataTemplate>
+                                                <Border Style="{StaticResource LauncherQuietCardBorderStyle}">
+                                                    <Grid RowSpacing="10">
+                                                        <Grid.RowDefinitions>
+                                                            <RowDefinition Height="Auto" />
+                                                            <RowDefinition Height="Auto" />
+                                                        </Grid.RowDefinitions>
+                                                        <StackPanel Spacing="2">
+                                                            <TextBlock FontWeight="SemiBold" Text="{Binding DisplayName}" TextWrapping="WrapWholeWords" />
+                                                            <TextBlock Style="{StaticResource LauncherCaptionTextBlockStyle}" Text="{Binding SourceDisplayName}" />
+                                                            <TextBlock Style="{StaticResource LauncherCaptionTextBlockStyle}" Text="{Binding JavaPath}" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
+                                                        </StackPanel>
+                                                        <StackPanel Grid.Row="1" HorizontalAlignment="Left" Orientation="Horizontal" Spacing="8">
+                                                            <ToggleSwitch IsOn="{Binding Enabled, Mode=OneWay}" Tag="{Binding}" Toggled="OnRuntimeEnabledToggled" />
+                                                            <Button AutomationProperties.Name="删除运行时" Click="OnDeleteRuntimeClick" IsEnabled="{Binding CanDelete}" Tag="{Binding}">
+                                                                <SymbolIcon Symbol="Delete" />
+                                                            </Button>
+                                                        </StackPanel>
+                                                    </Grid>
+                                                </Border>
+                                            </DataTemplate>
+                                        </ListView.ItemTemplate>
+                                    </ListView>
+                                </StackPanel>
+                            </Border>
+                        </Grid>
+                    </Grid>
+                </ScrollViewer>
+
+                <ScrollViewer
+                    x:Name="DebugView"
+                    HorizontalScrollBarVisibility="Disabled"
+                    HorizontalScrollMode="Disabled"
+                    Visibility="Collapsed"
+                    VerticalScrollBarVisibility="Auto">
+                    <Grid x:Name="DebugPanel" HorizontalAlignment="Left" MaxWidth="{ThemeResource LauncherContentMaxWidth}">
+                        <Border Style="{StaticResource LauncherCardBorderStyle}">
+                            <Grid RowSpacing="12">
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
+                                <ToggleSwitch x:Name="DebugModeSwitch" Header="调试模式" Toggled="OnDebugModeToggled" />
+                                <CommandBar
+                                    x:Name="DebugCommandBar"
+                                    Grid.Row="1"
+                                    DefaultLabelPosition="Right"
+                                    HorizontalAlignment="Left"
+                                    IsOpen="False">
+                                    <AppBarButton Click="OnRefreshDebugLogClick" Label="刷新">
+                                        <AppBarButton.Icon>
+                                            <SymbolIcon Symbol="Refresh" />
+                                        </AppBarButton.Icon>
+                                    </AppBarButton>
+                                    <AppBarButton Click="OnClearDebugLogClick" Label="清空">
+                                        <AppBarButton.Icon>
+                                            <SymbolIcon Symbol="Clear" />
+                                        </AppBarButton.Icon>
+                                    </AppBarButton>
+                                    <AppBarButton Click="OnOpenDebugLogDirClick" Label="打开目录">
+                                        <AppBarButton.Icon>
+                                            <SymbolIcon Symbol="OpenFile" />
+                                        </AppBarButton.Icon>
+                                    </AppBarButton>
+                                </CommandBar>
+                                <TextBox
+                                    x:Name="DebugLogBox"
+                                    Grid.Row="2"
+                                    AcceptsReturn="True"
+                                    FontFamily="Cascadia Mono, Consolas"
+                                    IsReadOnly="True"
+                                    MinHeight="320"
+                                    TextWrapping="NoWrap" />
+                            </Grid>
+                        </Border>
+                    </Grid>
+                </ScrollViewer>
+            </Grid>
+
+            <ItemsControl
+                x:Name="TasksList"
+                Grid.Row="3"
+                AutomationProperties.Name="活动任务"
+                HorizontalAlignment="Left"
+                Margin="0,12,0,0"
+                ItemsSource="{Binding ActiveTasks}"
+                MaxWidth="{ThemeResource LauncherContentMaxWidth}">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <Border Margin="0,0,0,8" Style="{StaticResource LauncherQuietCardBorderStyle}">
+                            <Grid ColumnSpacing="12" RowSpacing="6">
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Spacing="2">
+                                    <TextBlock FontWeight="SemiBold" Text="{Binding Label}" TextWrapping="WrapWholeWords" />
+                                    <TextBlock Style="{StaticResource LauncherCaptionTextBlockStyle}" Text="{Binding Message}" />
+                                </StackPanel>
+                                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6">
+                                    <Button AutomationProperties.Name="暂停任务" Click="OnPauseTaskClick" Tag="{Binding}">
+                                        <SymbolIcon Symbol="Pause" />
+                                    </Button>
+                                    <Button AutomationProperties.Name="继续任务" Click="OnResumeTaskClick" Tag="{Binding}">
+                                        <SymbolIcon Symbol="Play" />
+                                    </Button>
+                                    <Button AutomationProperties.Name="取消任务" Click="OnCancelTaskClick" Tag="{Binding}">
+                                        <SymbolIcon Symbol="Cancel" />
+                                    </Button>
+                                </StackPanel>
+                                <ProgressBar Grid.Row="1" Grid.ColumnSpan="2" Maximum="100" Minimum="0" Value="{Binding Progress}" />
+                                <TextBlock Grid.Row="1" Grid.ColumnSpan="2" Margin="0,18,0,0" Style="{StaticResource LauncherCaptionTextBlockStyle}" Text="{Binding ProgressText}" />
+                            </Grid>
+                        </Border>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </Grid>
+    </NavigationView>
+</Page>

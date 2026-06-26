@@ -1,12 +1,55 @@
-node_modules/
-dist/
-.vite/
+## .NET / WinUI
+[Bb]in/
+[Oo]bj/
+[Dd]ebug/
+[Rr]elease/
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+artifacts/
+
+## Build logs
+[Ll]og/
+[Ll]ogs/
+*.log
+*.binlog
+
+## Test results
+[Tt]est[Rr]esult*/
+*.trx
+*.coverage
+*.coveragexml
+
+## NuGet and packaging output
+*.nupkg
+*.snupkg
+*.nuget.props
+*.nuget.targets
+project.lock.json
+AppPackages/
+BundleArtifacts/
+*.msix
+*.msixupload
+*.appx
+*.appxbundle
+*.appxupload
+publish/
+*.pubxml
+PublishScripts/
+
+## Local tool caches
 .cache/
 .pnpm-store/
 .cargo/
 .rustup/
 .playwright-cli/
-src-tauri/target/
-src-tauri/gen/
-app-data/
-*.log
+
+## Legacy Tauri generated output
+legacy-tauri/node_modules/
+legacy-tauri/dist/
+legacy-tauri/.vite/
+legacy-tauri/src-tauri/target/
+legacy-tauri/src-tauri/gen/
+legacy-tauri/app-data/
