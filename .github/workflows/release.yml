@@ -64,7 +64,7 @@ jobs:
           Set-Content $csproj $content
 
       - name: Restore NuGet packages
-        run: dotnet restore MindustryLauncher.csproj --source https://api.nuget.org/v3/index.json
+        run: dotnet restore MindustryLauncher.csproj --source https://api.nuget.org/v3/index.json -p:RuntimeIdentifier=win-x64
 
       - name: Build (x64 Release)
         run: dotnet build MindustryLauncher.csproj -c Release -p:Platform=x64 -p:RuntimeIdentifier=win-x64 --no-restore
