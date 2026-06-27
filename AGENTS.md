@@ -1,43 +1,47 @@
 # Repository Guidelines
 
-## Project Structure & Module Organization
+## Project
 
-MindustryLauncher is now an unpackaged, self-contained WinUI 3 desktop app built with C# and the Windows App SDK. The active project lives at the repository root. `App.xaml` owns app resources and startup, `MainWindow.xaml` hosts the Mica-backed shell and title bar, and `MainPage.xaml` contains the current NavigationView experience. Shared models live in `Models/`, application services in `Services/`, theme and control dictionaries in `Styles/`, and bundled app imagery/icons in `Assets/`.
+Unpackaged WinUI 3 desktop app (C#, .NET 10, Windows App SDK 2.2). Single project at root, no test project, no MSIX packaging. `legacy-tauri/` is archived — do not wire new behavior into it.
 
-The previous Tauri + React + Rust implementation has been moved to `legacy-tauri/` for reference only. Do not wire new behavior into that legacy tree unless explicitly asked.
+## Build & Run
 
-## Build, Test, and Development Commands
-
-Always load the local PowerShell environment first:
+Always load the local PowerShell environment first (pins npm/pnpm/cargo caches to the repo):
 
 ```powershell
 . .\scripts\dev-env.ps1
-```
-
-- `dotnet restore .\MindustryLauncher.csproj --source https://api.nuget.org/v3/index.json`: restore WinUI and Windows App SDK packages.
-- `dotnet build .\MindustryLauncher.csproj -c Debug -p:Platform=x64`: build the local debug app.
-- `dotnet build .\MindustryLauncher.csproj -c Release -p:Platform=x64`: build the release executable.
-- `.\bin\x64\Debug\net10.0-windows10.0.19041.0\win-x64\MindustryLauncher.exe`: run the unpackaged debug build after a successful build.
-
-## Coding Style & Naming Conventions
-
-Use nullable C# with standard .NET naming: public types and XAML controls use `PascalCase`, private fields use `_camelCase`, and methods use `PascalCase`. XAML resources should be centralized in `Styles/ThemeResources.xaml` and `Styles/ControlStyles.xaml`; prefer theme resources, WinUI system brushes, and built-in controls before introducing custom styling.
-
-## WinUI Design Guidelines
-
-Keep the app aligned with Windows native behavior: use `NavigationView`, `CommandBar`, `InfoBar`, `ListView`, `ContentDialog`, `ToggleSwitch`, `ComboBox`, `NumberBox`, and other stock controls where they fit. Maintain light, dark, and high-contrast compatibility through theme-aware resources. Responsive layout should be handled through explicit width breakpoints in code-behind or reusable resources, not hard-coded one-size layouts.
-
-## Testing Guidelines
-
-After changing WinUI UI, resources, startup, packaging, or services, run:
-
-```powershell
-. .\scripts\dev-env.ps1
+dotnet restore .\MindustryLauncher.csproj --source https://api.nuget.org/v3/index.json
 dotnet build .\MindustryLauncher.csproj -c Debug -p:Platform=x64
+.\bin\x64\Debug\net10.0-windows10.0.19041.0\win-x64\MindustryLauncher.exe
 ```
 
-For UI changes, launch the built executable and verify a real top-level window appears, responds, and shows the expected shell/page. If the executable is locked by a running app instance, stop only the `MindustryLauncher` process before rebuilding.
+Platform must be explicit (`x64` / `x86` / `ARM64`). `dotnet run` is not configured — launch the built exe directly. If `exe` is locked by a running instance, stop only the `MindustryLauncher` process before rebuilding.
 
-## Security & Configuration Tips
+**No linter, formatter, or typecheck step exists — build is the only verification.**
 
-Do not commit build output, local caches, generated binaries, private tokens, proxy credentials, or portable user data. Preserve checksum validation, safe path checks, download pause/cancel behavior, and conservative file-system handling in launcher services.
+## Release
+
+GitHub CI (`release.yml`) triggers on tags `v*` or via `workflow_dispatch`:
+
+```powershell
+# manual publish equivalent
+dotnet publish .\MindustryLauncher.csproj -c Release -p:Platform=x64 -p:RuntimeIdentifier=win-x64 -o publish/MindustryLauncher
+```
+
+Version is read from `MindustryLauncher.csproj` `<Version>` element.
+
+## Architecture
+
+- **App.xaml.cs** — `App.Launcher` singleton (`LauncherService`). Startup creates `MainWindow` → navigates to `MainPage`.
+- **MainWindow.xaml.cs** — Mica titlebar (`ExtendsContentIntoTitleBar`), window sizing (720–1120 wide, 560–760 tall), frame navigation.
+- **MainPage.xaml.cs** — Single-page `NavigationView` (games/versions/settings/debug). All UI logic lives here. Responsive breakpoints defined in code-behind (720/760/820/1160 px).
+- **Models/LauncherModels.cs** — All models in one file. JSON serialization uses `JsonSettings.Options` (camelCase, custom enum converters). `FileSystemUtil.WriteJsonAsync` writes atomically via `.tmp` + `File.Move`.
+- **Services/** — `LauncherService` split into partials (`Runtime.cs`, `Update.cs`, `Versions.cs`, `Instances.cs`, `GameTracking.cs`). `NetworkClient` handles download with pause/cancel/resume + checksum validation. `AppDebugLog` writes to `<install-root>/logs/debug.log` with 2 MB rotation (4 archives max).
+- **Portable data** — `MindustryLauncherData/` next to the exe stores an `install-root.json` pointer (default: `MindustryLauncherData/data/`). All state (settings, instances, runtimes, caches) lives under the install root.
+- **GitHub network layer** — URLs are rewritten through configurable accelerators (HubProxy, GHProxy, or direct) with automatic fallback. Accelerator list fetched from `github.com/kabaka9527/MindustryLauncher/main/resources/github-accelerators.json`.
+
+## Style
+
+- Public types/methods: `PascalCase`. Private fields: `_camelCase`. Nullable enabled project-wide.
+- XAML resources in `Styles/ThemeResources.xaml` and `Styles/ControlStyles.xaml`. Prefer theme-aware system brushes.
+- UI strings are in Chinese (zh-CN). `Converters/BoolToVisibilityConverter.cs` registered globally in `App.xaml`.
