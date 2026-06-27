@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - 'v*'
+      - 'release:*'
   workflow_dispatch:
     inputs:
       version:
@@ -39,7 +40,7 @@ jobs:
           if ("${{ github.event_name }}" -eq "workflow_dispatch") {
             $v = "${{ inputs.version }}"
           } else {
-            $v = "${{ github.ref_name }}" -replace '^v', ''
+            $v = "${{ github.ref_name }}" -replace '^(v|release:)\s*', ''
           }
           echo "value=$v" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
