@@ -19,6 +19,9 @@ on:
         default: false
         type: boolean
 
+permissions:
+  contents: write
+
 env:
   DOTNET_CLI_TELEMETRY_OUTPUT: false
   DOTNET_NOLOGO: true

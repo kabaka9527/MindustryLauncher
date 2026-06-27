@@ -57,7 +57,7 @@ public sealed partial class LauncherService
             {
                 try
                 {
-                    var releases = await network.GetJsonAsync<List<GitHubRelease>>(candidate);
+                    var releases = await network.GetJsonAsync(candidate, AppJsonContext.Default.ListGitHubRelease);
                     return (spec.Channel, releases
                         .Where(release => spec.FilterMatches(release.Prerelease))
                         .Select(release => MapRelease(spec.Channel, release, instances))

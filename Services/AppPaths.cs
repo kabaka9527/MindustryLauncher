@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization.Metadata;
 
 namespace MindustryLauncher.Services;
 
@@ -51,6 +52,11 @@ public sealed class InstallLayout
     }
 }
 
+internal sealed class InstallRootPointer
+{
+    public string InstallRoot { get; set; } = string.Empty;
+}
+
 public static class AppPaths
 {
     private const string PortableDataDirName = "MindustryLauncherData";
@@ -100,15 +106,16 @@ public static class AppPaths
     public static async Task SaveInstallRootAsync(string root)
     {
         Directory.CreateDirectory(PortableDataDir);
+        var pointer = new InstallRootPointer { InstallRoot = root };
         await File.WriteAllTextAsync(
             InstallRootPointerPath,
-            JsonSerializer.Serialize(new { installRoot = root }, JsonSettings.Options));
+            JsonSerializer.Serialize(pointer, AppJsonContext.Default.InstallRootPointer));
     }
 }
 
 public static class FileSystemUtil
 {
-    public static async Task<T?> ReadJsonAsync<T>(string path)
+    public static async Task<T?> ReadJsonAsync<T>(string path, JsonTypeInfo<T> jsonTypeInfo)
     {
         if (!File.Exists(path))
         {
@@ -116,10 +123,10 @@ public static class FileSystemUtil
         }
 
         await using var stream = File.OpenRead(path);
-        return await JsonSerializer.DeserializeAsync<T>(stream, JsonSettings.Options);
+        return await JsonSerializer.DeserializeAsync(stream, jsonTypeInfo);
     }
 
-    public static async Task WriteJsonAsync<T>(string path, T value)
+    public static async Task WriteJsonAsync<T>(string path, T value, JsonTypeInfo<T> jsonTypeInfo)
     {
         var directory = Path.GetDirectoryName(path);
         if (!string.IsNullOrWhiteSpace(directory))
@@ -130,7 +137,7 @@ public static class FileSystemUtil
         var tmp = Path.ChangeExtension(path, ".tmp");
         await using (var stream = File.Create(tmp))
         {
-            await JsonSerializer.SerializeAsync(stream, value, JsonSettings.Options);
+            await JsonSerializer.SerializeAsync(stream, value, jsonTypeInfo);
         }
 
         File.Move(tmp, path, true);

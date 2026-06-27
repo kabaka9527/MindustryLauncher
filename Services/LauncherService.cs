@@ -58,7 +58,7 @@ public sealed partial class LauncherService
         _settings = settings;
         var layout = Layout;
         layout.Ensure();
-        await FileSystemUtil.WriteJsonAsync(layout.SettingsPath, settings);
+        await FileSystemUtil.WriteJsonAsync(layout.SettingsPath, settings, AppJsonContext.Default.Settings);
         await AppPaths.SaveInstallRootAsync(layout.Root);
         AppDebugLog.Configure(Path.Combine(layout.LogsDir, "debug.log"), settings.DebugMode);
         return settings;
@@ -80,7 +80,7 @@ public sealed partial class LauncherService
             {
                 try
                 {
-                    var list = await network.GetJsonUncachedAsync<AcceleratorList>(url);
+                    var list = await network.GetJsonUncachedAsync(url, AppJsonContext.Default.AcceleratorList);
                     _accelerators = EnsureRequiredAccelerators(list);
                     return _accelerators;
                 }
@@ -153,7 +153,7 @@ public sealed partial class LauncherService
         var layout = new InstallLayout(root);
         layout.Ensure();
 
-        var settings = await FileSystemUtil.ReadJsonAsync<Settings>(layout.SettingsPath)
+        var settings = await FileSystemUtil.ReadJsonAsync(layout.SettingsPath, AppJsonContext.Default.Settings)
             ?? new Settings { InstallRoot = root };
         if (string.IsNullOrWhiteSpace(settings.InstallRoot))
         {
@@ -165,7 +165,7 @@ public sealed partial class LauncherService
             settings.ChannelVisibility = new ChannelVisibility();
         }
 
-        await FileSystemUtil.WriteJsonAsync(layout.SettingsPath, settings);
+        await FileSystemUtil.WriteJsonAsync(layout.SettingsPath, settings, AppJsonContext.Default.Settings);
         await AppPaths.SaveInstallRootAsync(settings.InstallRoot);
         return settings;
     }
@@ -312,17 +312,17 @@ public sealed partial class LauncherService
 
     private static async Task<List<InstalledInstance>> LoadInstancesAsync(InstallLayout layout)
     {
-        return await FileSystemUtil.ReadJsonAsync<List<InstalledInstance>>(layout.InstancesPath) ?? [];
+        return await FileSystemUtil.ReadJsonAsync(layout.InstancesPath, AppJsonContext.Default.ListInstalledInstance) ?? [];
     }
 
     private static async Task SaveInstancesAsync(InstallLayout layout, List<InstalledInstance> instances)
     {
-        await FileSystemUtil.WriteJsonAsync(layout.InstancesPath, instances);
+        await FileSystemUtil.WriteJsonAsync(layout.InstancesPath, instances, AppJsonContext.Default.ListInstalledInstance);
     }
 
     private static async Task<List<RuntimeInfo>> LoadRuntimesAsync(InstallLayout layout)
     {
-        var runtimes = await FileSystemUtil.ReadJsonAsync<List<RuntimeInfo>>(layout.RuntimesPath) ?? [];
+        var runtimes = await FileSystemUtil.ReadJsonAsync(layout.RuntimesPath, AppJsonContext.Default.ListRuntimeInfo) ?? [];
         foreach (var runtime in runtimes.Where(runtime => runtime.Source == RuntimeSource.Unknown))
         {
             runtime.Source = runtime.Id switch
@@ -340,17 +340,17 @@ public sealed partial class LauncherService
 
     private static async Task SaveRuntimesAsync(InstallLayout layout, List<RuntimeInfo> runtimes)
     {
-        await FileSystemUtil.WriteJsonAsync(layout.RuntimesPath, runtimes);
+        await FileSystemUtil.WriteJsonAsync(layout.RuntimesPath, runtimes, AppJsonContext.Default.ListRuntimeInfo);
     }
 
     private static async Task<List<RemoteVersion>> LoadCachedVersionsAsync(InstallLayout layout)
     {
-        return await FileSystemUtil.ReadJsonAsync<List<RemoteVersion>>(layout.VersionsCachePath) ?? [];
+        return await FileSystemUtil.ReadJsonAsync(layout.VersionsCachePath, AppJsonContext.Default.ListRemoteVersion) ?? [];
     }
 
     private static async Task SaveCachedVersionsAsync(InstallLayout layout, List<RemoteVersion> versions)
     {
-        await FileSystemUtil.WriteJsonAsync(layout.VersionsCachePath, versions);
+        await FileSystemUtil.WriteJsonAsync(layout.VersionsCachePath, versions, AppJsonContext.Default.ListRemoteVersion);
     }
 
     private static string SafePathPart(string value)

@@ -1155,7 +1155,8 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
 
     private static Settings Clone(Settings value)
     {
-        return JsonSerializer.Deserialize<Settings>(JsonSerializer.Serialize(value, JsonSettings.Options), JsonSettings.Options) ?? new Settings();
+        var json = JsonSerializer.Serialize(value, AppJsonContext.Default.Settings);
+        return JsonSerializer.Deserialize(json, AppJsonContext.Default.Settings) ?? new Settings();
     }
 
     private static string? NullIfBlank(string value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();

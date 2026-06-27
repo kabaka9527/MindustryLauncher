@@ -4,6 +4,7 @@ using System.Net.Http.Headers;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization.Metadata;
 using MindustryLauncher.Models;
 
 namespace MindustryLauncher.Services;
@@ -105,17 +106,17 @@ public sealed class NetworkClient
         }
     }
 
-    public async Task<T> GetJsonAsync<T>(string url, CancellationToken cancellationToken = default)
+    public async Task<T> GetJsonAsync<T>(string url, JsonTypeInfo<T> jsonTypeInfo, CancellationToken cancellationToken = default)
     {
         var body = await GetTextCachedAsync(url, cancellationToken);
-        return JsonSerializer.Deserialize<T>(body, JsonSettings.Options)
+        return JsonSerializer.Deserialize(body, jsonTypeInfo)
             ?? throw new InvalidOperationException($"无法解析远端 JSON：{url}");
     }
 
-    public async Task<T> GetJsonUncachedAsync<T>(string url, CancellationToken cancellationToken = default)
+    public async Task<T> GetJsonUncachedAsync<T>(string url, JsonTypeInfo<T> jsonTypeInfo, CancellationToken cancellationToken = default)
     {
         var body = await GetTextUncachedAsync(url, cancellationToken);
-        return JsonSerializer.Deserialize<T>(body, JsonSettings.Options)
+        return JsonSerializer.Deserialize(body, jsonTypeInfo)
             ?? throw new InvalidOperationException($"无法解析远端 JSON：{url}");
     }
 
@@ -154,7 +155,7 @@ public sealed class NetworkClient
         CachedResponse? cached = null;
         if (File.Exists(cachePath))
         {
-            cached = await FileSystemUtil.ReadJsonAsync<CachedResponse>(cachePath);
+            cached = await FileSystemUtil.ReadJsonAsync(cachePath, AppJsonContext.Default.CachedResponse);
         }
 
         Exception? last = null;
@@ -181,7 +182,7 @@ public sealed class NetworkClient
                     {
                         Etag = response.Headers.ETag?.Tag,
                         Body = body
-                    });
+                    }, AppJsonContext.Default.CachedResponse);
                     return body;
                 }
 
@@ -471,9 +472,10 @@ public sealed class NetworkClient
         }
     }
 
-    private sealed class CachedResponse
-    {
-        public string? Etag { get; set; }
-        public string Body { get; set; } = string.Empty;
-    }
+}
+
+internal sealed class CachedResponse
+{
+    public string? Etag { get; set; }
+    public string Body { get; set; } = string.Empty;
 }

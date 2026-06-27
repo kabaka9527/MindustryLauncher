@@ -19,7 +19,7 @@ public sealed partial class LauncherService
         {
             try
             {
-                var release = await network.GetJsonAsync<GitHubRelease>(candidate);
+                var release = await network.GetJsonAsync(candidate, AppJsonContext.Default.GitHubRelease);
                 var latest = release.TagName.Trim().TrimStart('v');
                 return new LauncherUpdateInfo
                 {

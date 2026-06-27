@@ -2,9 +2,11 @@ using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using System.Text.Json.Serialization;
+using MindustryLauncher.Services;
 
 namespace MindustryLauncher.Models;
 
+[JsonConverter(typeof(ThemePreferenceConverter))]
 public enum ThemePreference
 {
     System,
@@ -12,6 +14,7 @@ public enum ThemePreference
     Dark
 }
 
+[JsonConverter(typeof(GameChannelConverter))]
 public enum GameChannel
 {
     Mindustry,
@@ -20,6 +23,7 @@ public enum GameChannel
     MindustryXBE
 }
 
+[JsonConverter(typeof(RuntimeSourceConverter))]
 public enum RuntimeSource
 {
     Launcher,
