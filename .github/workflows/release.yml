@@ -2,8 +2,6 @@ name: Build and Release
 
 on:
   push:
-    branches:
-      - main
     tags:
       - 'v*'
       - 'release:*'
@@ -44,11 +42,8 @@ jobs:
         run: |
           if ("${{ github.event_name }}" -eq "workflow_dispatch") {
             $v = "${{ inputs.version }}"
-          } elseif ("${{ github.ref_type }}" -eq "tag") {
-            $v = "${{ github.ref_name }}" -replace '^(v|release:)\s*', ''
           } else {
-            $xml = [xml](Get-Content 'MindustryLauncher.csproj' -Raw)
-            $v = $xml.Project.PropertyGroup.Version
+            $v = "${{ github.ref_name }}" -replace '^(v|release:)', ''
           }
           echo "value=$v" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
@@ -80,19 +75,25 @@ jobs:
       - name: Publish self-contained
         run: dotnet publish MindustryLauncher.csproj -c Release -p:Platform=x64 -p:RuntimeIdentifier=win-x64 --no-build -o publish/MindustryLauncher
 
+      - name: Resolve release tag
+        id: release_tag
+        shell: pwsh
+        run: |
+          $t = "v${{ steps.version.outputs.value }}"
+          echo "value=$t" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
       - name: Package artifacts
         shell: pwsh
         run: |
           Compress-Archive -Path publish/MindustryLauncher/* -DestinationPath "MindustryLauncher-${{ steps.version.outputs.value }}-x64.zip"
 
       - name: Create GitHub Release
-        if: github.ref_type == 'tag' || github.event_name == 'workflow_dispatch'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v${{ steps.version.outputs.value }}
-          name: v${{ steps.version.outputs.value }}
+          tag_name: ${{ steps.release_tag.outputs.value }}
+          name: ${{ steps.release_tag.outputs.value }}
           body: |
-            ## Mindustry Launcher v${{ steps.version.outputs.value }}
+            ## Mindustry Launcher ${{ steps.release_tag.outputs.value }}
 
             ### Downloads
             - [MindustryLauncher-${{ steps.version.outputs.value }}-x64.zip](MindustryLauncher-${{ steps.version.outputs.value }}-x64.zip) — Windows x64 self-contained build
