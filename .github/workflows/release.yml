@@ -72,7 +72,7 @@ jobs:
         run: dotnet restore MindustryLauncher.csproj --source https://api.nuget.org/v3/index.json -p:RuntimeIdentifier=win-x64
 
       - name: Build (x64 Release)
-        run: dotnet build MindustryLauncher.csproj -c Release -p:Platform=x64 -p:RuntimeIdentifier=win-x64 --no-restore
+        run: dotnet build MindustryLauncher.csproj -c Release -p:Platform=x64 -p:RuntimeIdentifier=win-x64
 
       - name: Publish self-contained
         run: dotnet publish MindustryLauncher.csproj -c Release -p:Platform=x64 -p:RuntimeIdentifier=win-x64 --no-build -o publish/MindustryLauncher
