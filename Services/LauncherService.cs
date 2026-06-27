@@ -43,7 +43,7 @@ public sealed partial class LauncherService
             Settings = _settings,
             Accelerators = _accelerators,
             Versions = await LoadCachedVersionsAsync(layout),
-            Instances = await LoadInstancesAsync(layout),
+            Instances = await LoadInstancesWithRunningStateAsync(),
             Runtimes = await LoadRuntimesAsync(layout)
         };
     }

@@ -73,8 +73,10 @@
                                 <ColumnDefinition Width="*" />
                                 <ColumnDefinition Width="*" />
                                 <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
                             </Grid.ColumnDefinitions>
                             <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
                                 <RowDefinition Height="Auto" />
                                 <RowDefinition Height="Auto" />
                                 <RowDefinition Height="Auto" />
@@ -127,6 +129,19 @@
                                     </StackPanel>
                                 </Grid>
                             </Border>
+                            <Border x:Name="PlayTimeMetricCard" Style="{StaticResource LauncherQuietCardBorderStyle}">
+                                <Grid ColumnSpacing="12">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <FontIcon FontSize="22" Glyph="&#xE916;" Foreground="{ThemeResource LauncherAccentBrush}" />
+                                    <StackPanel Grid.Column="1" Spacing="2">
+                                        <TextBlock Style="{StaticResource LauncherCaptionTextBlockStyle}" Text="累计游戏时间" />
+                                        <TextBlock x:Name="PlayTimeMetricValue" FontSize="20" FontWeight="SemiBold" Text="-" />
+                                    </StackPanel>
+                                </Grid>
+                            </Border>
                         </Grid>
 
                         <CommandBar
@@ -164,50 +179,84 @@
                                 <ListView.ItemTemplate>
                                     <DataTemplate>
                                         <Border Style="{StaticResource LauncherCardBorderStyle}">
-                                            <Grid ColumnSpacing="14" RowSpacing="12">
-                                                <Grid.ColumnDefinitions>
-                                                    <ColumnDefinition Width="Auto" />
-                                                    <ColumnDefinition Width="*" />
-                                                </Grid.ColumnDefinitions>
-                                                <Grid.RowDefinitions>
-                                                    <RowDefinition Height="Auto" />
-                                                    <RowDefinition Height="Auto" />
-                                                </Grid.RowDefinitions>
-                                                <Image
-                                                    Grid.RowSpan="2"
-                                                    Width="54"
-                                                    Height="54"
-                                                    AutomationProperties.Name="{Binding ChannelDisplayName}"
-                                                    Source="{Binding ChannelImagePath}"
-                                                    Stretch="Uniform" />
-                                                <StackPanel Grid.Column="1" Spacing="4">
-                                                    <TextBlock FontSize="18" FontWeight="SemiBold" Text="{Binding Version}" TextWrapping="WrapWholeWords" />
-                                                    <TextBlock Style="{StaticResource LauncherCaptionTextBlockStyle}" Text="{Binding ChannelDisplayName}" />
-                                                    <TextBlock Style="{StaticResource LauncherCaptionTextBlockStyle}" Text="{Binding InstalledDisplay}" />
-                                                </StackPanel>
-                                                <CommandBar
-                                                    Grid.Row="1"
-                                                    Grid.Column="1"
-                                                    DefaultLabelPosition="Collapsed"
+                                            <Grid>
+                                                <Rectangle
+                                                    Width="4"
+                                                    Margin="6,0,0,0"
                                                     HorizontalAlignment="Left"
-                                                    IsOpen="False"
-                                                    OverflowButtonVisibility="Collapsed">
-                                                    <AppBarButton Click="OnLaunchInstanceClick" Label="启动" Tag="{Binding}">
-                                                        <AppBarButton.Icon>
-                                                            <SymbolIcon Symbol="Play" />
-                                                        </AppBarButton.Icon>
-                                                    </AppBarButton>
-                                                    <AppBarButton Click="OnEditInstanceClick" Label="参数" Tag="{Binding}">
-                                                        <AppBarButton.Icon>
-                                                            <SymbolIcon Symbol="Edit" />
-                                                        </AppBarButton.Icon>
-                                                    </AppBarButton>
-                                                    <AppBarButton Click="OnDeleteInstanceClick" Label="删除" Tag="{Binding}">
-                                                        <AppBarButton.Icon>
-                                                            <SymbolIcon Symbol="Delete" />
-                                                        </AppBarButton.Icon>
-                                                    </AppBarButton>
-                                                </CommandBar>
+                                                    Fill="{ThemeResource LauncherSuccessBrush}"
+                                                    RadiusX="2"
+                                                    RadiusY="2"
+                                                    Visibility="{Binding IsRunning, Converter={StaticResource BoolToVisibilityConverter}}" />
+                                                <Grid ColumnSpacing="14" RowSpacing="8" Margin="14,0,0,0">
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="Auto" />
+                                                        <ColumnDefinition Width="*" />
+                                                    </Grid.ColumnDefinitions>
+                                                    <Grid.RowDefinitions>
+                                                        <RowDefinition Height="Auto" />
+                                                        <RowDefinition Height="Auto" />
+                                                        <RowDefinition Height="Auto" />
+                                                    </Grid.RowDefinitions>
+                                                    <Image
+                                                        Grid.RowSpan="3"
+                                                        Width="54"
+                                                        Height="54"
+                                                        AutomationProperties.Name="{Binding ChannelDisplayName}"
+                                                        Source="{Binding ChannelImagePath}"
+                                                        Stretch="Uniform" />
+                                                    <StackPanel Grid.Column="1" Spacing="4">
+                                                        <TextBlock FontSize="18" FontWeight="SemiBold" Text="{Binding Version}" TextWrapping="WrapWholeWords" />
+                                                        <TextBlock Style="{StaticResource LauncherCaptionTextBlockStyle}" Text="{Binding ChannelDisplayName}" />
+                                                        <TextBlock Style="{StaticResource LauncherCaptionTextBlockStyle}" Text="{Binding InstalledDisplay}" />
+                                                    </StackPanel>
+                                                    <StackPanel
+                                                        Grid.Row="1"
+                                                        Grid.Column="1"
+                                                        Orientation="Horizontal"
+                                                        Spacing="6"
+                                                        Visibility="{Binding IsRunning, Converter={StaticResource BoolToVisibilityConverter}}">
+                                                        <Ellipse Width="8" Height="8" Fill="{ThemeResource LauncherSuccessBrush}" VerticalAlignment="Center" />
+                                                        <TextBlock
+                                                            Style="{StaticResource LauncherCaptionTextBlockStyle}"
+                                                            Foreground="{ThemeResource LauncherSuccessBrush}"
+                                                            FontWeight="SemiBold"
+                                                            Text="{Binding RunningStatusText}" />
+                                                        <TextBlock Style="{StaticResource LauncherCaptionTextBlockStyle}" Text="{Binding CurrentSessionText}" />
+                                                    </StackPanel>
+                                                    <Grid Grid.Row="2" Grid.Column="1">
+                                                        <Grid.ColumnDefinitions>
+                                                            <ColumnDefinition Width="*" />
+                                                            <ColumnDefinition Width="Auto" />
+                                                        </Grid.ColumnDefinitions>
+                                                        <TextBlock
+                                                            Style="{StaticResource LauncherCaptionTextBlockStyle}"
+                                                            Text="{Binding TotalPlayText}"
+                                                            VerticalAlignment="Center" />
+                                                        <CommandBar
+                                                            Grid.Column="1"
+                                                            DefaultLabelPosition="Collapsed"
+                                                            HorizontalAlignment="Left"
+                                                            IsOpen="False"
+                                                            OverflowButtonVisibility="Collapsed">
+                                                            <AppBarButton Click="OnLaunchInstanceClick" Label="启动" Tag="{Binding}">
+                                                                <AppBarButton.Icon>
+                                                                    <SymbolIcon Symbol="Play" />
+                                                                </AppBarButton.Icon>
+                                                            </AppBarButton>
+                                                            <AppBarButton Click="OnEditInstanceClick" Label="参数" Tag="{Binding}">
+                                                                <AppBarButton.Icon>
+                                                                    <SymbolIcon Symbol="Edit" />
+                                                                </AppBarButton.Icon>
+                                                            </AppBarButton>
+                                                            <AppBarButton Click="OnDeleteInstanceClick" Label="删除" Tag="{Binding}">
+                                                                <AppBarButton.Icon>
+                                                                    <SymbolIcon Symbol="Delete" />
+                                                                </AppBarButton.Icon>
+                                                            </AppBarButton>
+                                                        </CommandBar>
+                                                    </Grid>
+                                                </Grid>
                                             </Grid>
                                         </Border>
                                     </DataTemplate>
@@ -265,16 +314,14 @@
                             HorizontalAlignment="Stretch"
                             IsOpen="False">
                             <CommandBar.Content>
-                                <TextBlock Style="{StaticResource LauncherSectionTitleTextBlockStyle}" Text="版本源" />
+                                <StackPanel Orientation="Horizontal" Spacing="12">
+                                    <TextBlock Style="{StaticResource LauncherSectionTitleTextBlockStyle}" Text="版本源" />
+                                    <TextBlock Style="{StaticResource LauncherCaptionTextBlockStyle}" Text="{x:Bind LastRefreshTimeText, Mode=OneWay}" VerticalAlignment="Bottom" />
+                                </StackPanel>
                             </CommandBar.Content>
                             <AppBarButton Click="OnRefreshVersionsClick" Label="刷新版本">
                                 <AppBarButton.Icon>
                                     <SymbolIcon Symbol="Refresh" />
-                                </AppBarButton.Icon>
-                            </AppBarButton>
-                            <AppBarButton Click="OnToggleBeClick" Label="BE 频道">
-                                <AppBarButton.Icon>
-                                    <SymbolIcon Symbol="World" />
                                 </AppBarButton.Icon>
                             </AppBarButton>
                         </CommandBar>
@@ -547,12 +594,16 @@
                                                             <TextBlock Style="{StaticResource LauncherCaptionTextBlockStyle}" Text="{Binding SourceDisplayName}" />
                                                             <TextBlock Style="{StaticResource LauncherCaptionTextBlockStyle}" Text="{Binding JavaPath}" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
                                                         </StackPanel>
-                                                        <StackPanel Grid.Row="1" HorizontalAlignment="Left" Orientation="Horizontal" Spacing="8">
-                                                            <ToggleSwitch IsOn="{Binding Enabled, Mode=OneWay}" Tag="{Binding}" Toggled="OnRuntimeEnabledToggled" />
-                                                            <Button AutomationProperties.Name="删除运行时" Click="OnDeleteRuntimeClick" IsEnabled="{Binding CanDelete}" Tag="{Binding}">
+                                                        <Grid Grid.Row="1">
+                                                            <Grid.ColumnDefinitions>
+                                                                <ColumnDefinition Width="*" />
+                                                                <ColumnDefinition Width="Auto" />
+                                                            </Grid.ColumnDefinitions>
+                                                            <ToggleSwitch HorizontalAlignment="Left" IsOn="{Binding Enabled, Mode=OneWay}" Tag="{Binding}" Toggled="OnRuntimeEnabledToggled" />
+                                                            <Button Grid.Column="1" AutomationProperties.Name="删除运行时" Click="OnDeleteRuntimeClick" IsEnabled="{Binding CanDelete}" Tag="{Binding}">
                                                                 <SymbolIcon Symbol="Delete" />
                                                             </Button>
-                                                        </StackPanel>
+                                                        </Grid>
                                                     </Grid>
                                                 </Border>
                                             </DataTemplate>
@@ -640,18 +691,22 @@
                                     <TextBlock Style="{StaticResource LauncherCaptionTextBlockStyle}" Text="{Binding Message}" />
                                 </StackPanel>
                                 <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6">
-                                    <Button AutomationProperties.Name="暂停任务" Click="OnPauseTaskClick" Tag="{Binding}">
+                                    <Button Style="{StaticResource LauncherTaskButtonStyle}" AutomationProperties.Name="暂停任务" Click="OnPauseTaskClick" Tag="{Binding}" Visibility="{Binding IsRunning, Converter={StaticResource BoolToVisibilityConverter}}">
                                         <SymbolIcon Symbol="Pause" />
                                     </Button>
-                                    <Button AutomationProperties.Name="继续任务" Click="OnResumeTaskClick" Tag="{Binding}">
+                                    <Button Style="{StaticResource LauncherTaskButtonStyle}" AutomationProperties.Name="继续任务" Click="OnResumeTaskClick" Tag="{Binding}" Visibility="{Binding IsPaused, Converter={StaticResource BoolToVisibilityConverter}}">
                                         <SymbolIcon Symbol="Play" />
                                     </Button>
-                                    <Button AutomationProperties.Name="取消任务" Click="OnCancelTaskClick" Tag="{Binding}">
+                                    <Button Style="{StaticResource LauncherTaskButtonStyle}" AutomationProperties.Name="取消任务" Click="OnCancelTaskClick" Tag="{Binding}">
                                         <SymbolIcon Symbol="Cancel" />
                                     </Button>
                                 </StackPanel>
                                 <ProgressBar Grid.Row="1" Grid.ColumnSpan="2" Maximum="100" Minimum="0" Value="{Binding Progress}" />
-                                <TextBlock Grid.Row="1" Grid.ColumnSpan="2" Margin="0,18,0,0" Style="{StaticResource LauncherCaptionTextBlockStyle}" Text="{Binding ProgressText}" />
+                                <StackPanel Grid.Row="1" Grid.ColumnSpan="2" Margin="0,18,0,0" Orientation="Horizontal" Spacing="4">
+                                    <TextBlock Style="{StaticResource LauncherCaptionTextBlockStyle}" Text="{Binding ProgressText}" />
+                                    <TextBlock Style="{StaticResource LauncherCaptionTextBlockStyle}" Text="·" />
+                                    <TextBlock Style="{StaticResource LauncherCaptionTextBlockStyle}" Text="{Binding SpeedText}" />
+                                </StackPanel>
                             </Grid>
                         </Border>
                     </DataTemplate>

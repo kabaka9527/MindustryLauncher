@@ -139,6 +139,8 @@ public sealed partial class LauncherService
             throw new FileNotFoundException($"未找到 jar：{instance.JarPath}");
         }
 
+        AppDebugLog.Info($"准备启动游戏：{instance.Id}（{instance.JarPath}）");
+
         Directory.CreateDirectory(instance.DataDir);
         var requiredJava = RequiredJavaFromJar(instance.JarPath);
         var runtimes = await LoadRuntimesAsync(layout);
@@ -150,8 +152,11 @@ public sealed partial class LauncherService
                 .FirstOrDefault();
         if (runtime is null)
         {
+            AppDebugLog.Error($"缺少 JRE {requiredJava} 或更高版本");
             throw new InvalidOperationException($"缺少 JRE {requiredJava} 或更高版本");
         }
+
+        AppDebugLog.Info($"使用 JRE {runtime.JavaVersion}（{runtime.JavaPath}）");
 
         var logDir = Path.Combine(instance.InstallDir, "logs");
         Directory.CreateDirectory(logDir);
@@ -173,6 +178,8 @@ public sealed partial class LauncherService
         args.Add(instance.JarPath);
         args.AddRange(SplitCommandArgs(instance.LaunchSettings.GameArgs));
 
+        AppDebugLog.Info($"启动命令：{runtime.JavaPath} {string.Join(" ", args)}");
+
         var process = Process.Start(new ProcessStartInfo(runtime.JavaPath)
         {
             WorkingDirectory = instance.InstallDir,
@@ -182,11 +189,22 @@ public sealed partial class LauncherService
             RedirectStandardError = true
         }.WithArguments(args, instance.DataDir, logPath)) ?? throw new InvalidOperationException("启动游戏失败");
 
+        AppDebugLog.Info($"游戏已启动，PID {process.Id}，日志路径 {logPath}");
+
         _ = Task.Run(async () =>
         {
-            await using var log = File.Open(logPath, FileMode.Append, FileAccess.Write, FileShare.Read);
-            await Task.WhenAll(process.StandardOutput.BaseStream.CopyToAsync(log), process.StandardError.BaseStream.CopyToAsync(log));
+            try
+            {
+                await using var log = File.Open(logPath, FileMode.Append, FileAccess.Write, FileShare.Read);
+                await Task.WhenAll(process.StandardOutput.BaseStream.CopyToAsync(log), process.StandardError.BaseStream.CopyToAsync(log));
+            }
+            catch (Exception ex)
+            {
+                AppDebugLog.Warn($"游戏输出流写入失败：{ex.Message}");
+            }
         });
+
+        TrackGame(instanceId, process, DateTime.Now);
 
         return new LaunchResult { Pid = (uint)process.Id, LogPath = logPath };
     }

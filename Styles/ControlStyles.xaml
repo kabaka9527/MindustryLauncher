@@ -53,5 +53,13 @@
         <Setter Property="MinWidth" Value="36" />
         <Setter Property="MinHeight" Value="32" />
         <Setter Property="Padding" Value="10,6" />
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="CornerRadius" Value="4" />
+    </Style>
+
+    <Style x:Key="LauncherTaskButtonStyle" TargetType="Button" BasedOn="{StaticResource LauncherIconButtonStyle}">
+        <Setter Property="Background" Value="{ThemeResource CardBackgroundFillColorDefaultBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="BorderBrush" Value="{ThemeResource CardStrokeColorDefaultBrush}" />
     </Style>
 </ResourceDictionary>

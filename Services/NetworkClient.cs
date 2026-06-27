@@ -224,6 +224,8 @@ public sealed class NetworkClient
         onTask(task);
         void Publish() => onTask(task);
 
+        AppDebugLog.Info($"开始下载：{label}（{url}）");
+
         try
         {
             var total = knownTotalBytes ?? await ResolveDownloadSizeAsync(url, cancellationToken);
@@ -239,6 +241,7 @@ public sealed class NetworkClient
                     task.Status = "canceled";
                     task.Message = "已取消";
                     Publish();
+                    AppDebugLog.Warn($"下载已取消：{label}");
                     TryDelete(tmp);
                     throw new OperationCanceledException("下载已取消");
                 }
@@ -281,6 +284,8 @@ public sealed class NetworkClient
                     var buffer = new byte[64 * 1024];
                     var downloaded = resumeFrom;
                     var started = DateTimeOffset.UtcNow;
+                    var lastPublishBytes = resumeFrom;
+                    var lastPublishTime = started;
                     while (true)
                     {
                         if (control.Canceled)
@@ -301,6 +306,10 @@ public sealed class NetworkClient
                             await control.WaitWhilePausedAsync(cancellationToken);
                             task.Status = "running";
                             task.Message = "继续下载";
+                            downloaded = 0;
+                            started = DateTimeOffset.UtcNow;
+                            lastPublishBytes = 0;
+                            lastPublishTime = started;
                             Publish();
                         }
 
@@ -312,19 +321,30 @@ public sealed class NetworkClient
 
                         await output.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
                         downloaded += (ulong)read;
-                        var seconds = Math.Max(0.001, (DateTimeOffset.UtcNow - started).TotalSeconds);
-                        task.DownloadedBytes = downloaded;
-                        task.BytesPerSecond = (ulong)((downloaded - resumeFrom) / seconds);
-                        task.Message = "下载中";
-                        Publish();
+                        task.DownloadedBytes = resumeFrom + downloaded;
+
+                        var now = DateTimeOffset.UtcNow;
+                        var elapsed = (now - lastPublishTime).TotalSeconds;
+                        if (elapsed >= 0.3)
+                        {
+                            var delta = downloaded - lastPublishBytes;
+                            task.BytesPerSecond = delta > 0
+                                ? (ulong)(delta / Math.Max(0.001, elapsed))
+                                : 0;
+                            lastPublishBytes = downloaded;
+                            lastPublishTime = now;
+                            task.Message = "下载中";
+                            Publish();
+                        }
                     }
 
                     break;
                 }
-                catch when (attempt < 2)
+                catch (Exception ex) when (attempt < 2)
                 {
                     task.Message = $"重试 {attempt + 2}/3";
                     Publish();
+                    AppDebugLog.Warn($"下载重试 {attempt + 2}/3：{label}（{ex.Message}）");
                     await Task.Delay(500 * (attempt + 1), cancellationToken);
                 }
             }
@@ -344,14 +364,16 @@ public sealed class NetworkClient
             task.Message = "完成";
             task.DownloadedBytes = task.TotalBytes ?? (ulong)new FileInfo(destination).Length;
             Publish();
+            AppDebugLog.Info($"下载完成：{label}");
         }
-        catch
+        catch (Exception ex)
         {
             if (task.Status != "canceled")
             {
                 task.Status = "failed";
                 task.Message = "下载失败";
                 Publish();
+                AppDebugLog.Error($"下载失败：{label}（{ex.Message}）");
             }
 
             throw;

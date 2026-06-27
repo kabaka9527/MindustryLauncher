@@ -1,0 +1,92 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version number (e.g., 1.0.0)'
+        required: true
+        type: string
+      prerelease:
+        description: 'Mark as pre-release'
+        required: false
+        default: false
+        type: boolean
+
+env:
+  DOTNET_CLI_TELEMETRY_OUTPUT: false
+  DOTNET_NOLOGO: true
+
+jobs:
+  release:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Resolve version
+        id: version
+        shell: pwsh
+        run: |
+          if ("${{ github.event_name }}" -eq "workflow_dispatch") {
+            $v = "${{ inputs.version }}"
+          } else {
+            $v = "${{ github.ref_name }}" -replace '^v', ''
+          }
+          echo "value=$v" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Resolve prerelease flag
+        id: prerelease
+        shell: pwsh
+        run: |
+          if ("${{ github.event_name }}" -eq "workflow_dispatch") {
+            $p = "${{ inputs.prerelease }}"
+          } else {
+            $p = ("${{ github.ref_name }}" -match '-').ToString().ToLower()
+          }
+          echo "value=$p" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Update version in csproj
+        shell: pwsh
+        run: |
+          $csproj = 'MindustryLauncher.csproj'
+          $content = Get-Content $csproj -Raw
+          $content = $content -replace '<Version>.*?</Version>', "<Version>${{ steps.version.outputs.value }}</Version>"
+          Set-Content $csproj $content
+
+      - name: Restore NuGet packages
+        run: dotnet restore MindustryLauncher.csproj --source https://api.nuget.org/v3/index.json
+
+      - name: Build (x64 Release)
+        run: dotnet build MindustryLauncher.csproj -c Release -p:Platform=x64 -p:RuntimeIdentifier=win-x64 --no-restore
+
+      - name: Publish self-contained
+        run: dotnet publish MindustryLauncher.csproj -c Release -p:Platform=x64 -p:RuntimeIdentifier=win-x64 --no-build -o publish/MindustryLauncher
+
+      - name: Package artifacts
+        shell: pwsh
+        run: |
+          Compress-Archive -Path publish/MindustryLauncher/* -DestinationPath "MindustryLauncher-${{ steps.version.outputs.value }}-x64.zip"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version.outputs.value }}
+          name: v${{ steps.version.outputs.value }}
+          body: |
+            ## Mindustry Launcher v${{ steps.version.outputs.value }}
+
+            ### Downloads
+            - [MindustryLauncher-${{ steps.version.outputs.value }}-x64.zip](MindustryLauncher-${{ steps.version.outputs.value }}-x64.zip) — Windows x64 self-contained build
+          fail_on_unmatched_files: true
+          files: MindustryLauncher-${{ steps.version.outputs.value }}-x64.zip
+          draft: false
+          prerelease: ${{ steps.prerelease.outputs.value }}

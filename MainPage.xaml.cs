@@ -16,9 +16,12 @@ namespace MindustryLauncher;
 public sealed partial class MainPage : Page, INotifyPropertyChanged
 {
     private readonly LauncherService _launcher = App.Launcher;
+    private readonly DispatcherTimer _debugLogTimer = new();
+    private readonly DispatcherTimer _runningGameTimer = new();
     private bool _hydrating;
     private string _currentView = "games";
     private Settings _draft = new();
+    private DateTime _lastRefreshTime;
 
     public ObservableCollection<DashboardMetric> DashboardMetrics { get; } = [];
     public ObservableCollection<InstalledInstance> InstalledInstances { get; } = [];
@@ -27,6 +30,8 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
     public ObservableCollection<RemoteRuntime> RemoteRuntimes { get; } = [];
     public ObservableCollection<TaskRecord> ActiveTasks { get; } = [];
 
+    public string LastRefreshTimeText => _lastRefreshTime == default ? "" : $"上次刷新: {_lastRefreshTime:HH:mm:ss}";
+
     public event PropertyChangedEventHandler? PropertyChanged;
 
     public MainPage()
@@ -34,7 +39,12 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
         InitializeComponent();
         DataContext = this;
         KeyboardAcceleratorPlacementMode = KeyboardAcceleratorPlacementMode.Hidden;
+        _debugLogTimer.Interval = TimeSpan.FromSeconds(1);
+        _debugLogTimer.Tick += (_, _) => RefreshDebugLog();
+        _runningGameTimer.Interval = TimeSpan.FromSeconds(1);
+        _runningGameTimer.Tick += (_, _) => RefreshRunningDisplay();
         _launcher.TaskChanged += OnTaskChanged;
+        _launcher.GameExited += OnGameExited;
         RegisterKeyboardAccelerators();
     }
 
@@ -46,6 +56,29 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
             ApplyState(state);
             SetNotice("状态已同步");
         });
+
+        _ = DelayedRefreshVersionsAsync();
+        _ = DelayedLoadRuntimesAsync();
+    }
+
+    private async Task DelayedRefreshVersionsAsync()
+    {
+        await Task.Delay(2000);
+        try
+        {
+            await RefreshVersionsAsync();
+        }
+        catch { AppDebugLog.Warn("后台刷新版本列表失败"); }
+    }
+
+    private async Task DelayedLoadRuntimesAsync()
+    {
+        await Task.Delay(4000);
+        try
+        {
+            await LoadRemoteRuntimeCatalogAsync(false);
+        }
+        catch { AppDebugLog.Warn("后台加载运行时列表失败"); }
     }
 
     private void OnPageSizeChanged(object sender, SizeChangedEventArgs e)
@@ -89,6 +122,11 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
         if (view == "debug")
         {
             RefreshDebugLog();
+            _debugLogTimer.Start();
+        }
+        else
+        {
+            _debugLogTimer.Stop();
         }
 
         ApplyResponsiveLayout(ActualWidth);
@@ -198,6 +236,8 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
             await _launcher.RefreshAcceleratorsAsync();
             await _launcher.RefreshVersionsAsync();
             ApplyState(await _launcher.GetAppStateAsync());
+            _lastRefreshTime = DateTime.Now;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(LastRefreshTimeText)));
             SetNotice("已刷新");
         });
     }
@@ -208,6 +248,8 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
         {
             await _launcher.RefreshVersionsAsync();
             ApplyState(await _launcher.GetAppStateAsync());
+            _lastRefreshTime = DateTime.Now;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(LastRefreshTimeText)));
             SetNotice("版本列表已刷新");
         });
     }
@@ -337,6 +379,10 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
         await RunAsync("正在启动游戏", async () =>
         {
             var result = await _launcher.LaunchVersionAsync(instance.Id);
+            instance.IsRunning = true;
+            instance.CurrentSessionStart = DateTime.Now;
+            instance.NotifyRunningStateChanged();
+            _runningGameTimer.Start();
             SetNotice($"游戏已启动，PID {result.Pid}");
         });
     }
@@ -450,6 +496,15 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
         _draft.DebugMode = DebugModeSwitch.IsOn;
         await _launcher.SaveSettingsAsync(_draft);
         RefreshDebugLog();
+
+        if (_draft.DebugMode && _currentView == "debug")
+        {
+            _debugLogTimer.Start();
+        }
+        else
+        {
+            _debugLogTimer.Stop();
+        }
     }
 
     private async void OnLoadRemoteRuntimesClick(object sender, RoutedEventArgs e)
@@ -582,6 +637,7 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
         InstalledMetricValue.Text = state.Instances.Count.ToString();
         RuntimeMetricValue.Text = state.Runtimes.Count(item => item.Enabled).ToString();
         InstallRootMetricValue.Text = state.Settings.InstallRoot;
+        PlayTimeMetricValue.Text = TotalPlayTimeDisplay();
         InstalledInstances.ReplaceWith(state.Instances.OrderByDescending(item => item.InstalledAt));
         VisibleVersions.ReplaceWith(state.Versions
             .Where(version => state.Settings.ChannelVisibility.IsVisible(version.Channel, state.Settings.ShowBe))
@@ -589,6 +645,7 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
             .ThenByDescending(version => version.PublishedAt));
         Runtimes.ReplaceWith(state.Runtimes.OrderByDescending(item => item.JavaVersion).ThenBy(item => item.SourceDisplayName));
 
+        ApplyRunningState();
         InstallRootBox.Text = _draft.InstallRoot;
         GithubProxyBox.Text = _draft.GithubProxyPrefix ?? string.Empty;
         HttpProxyBox.Text = _draft.HttpProxy ?? string.Empty;
@@ -637,7 +694,9 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
             Header = "运行时",
             DisplayMemberPath = "DisplayName",
             ItemsSource = Runtimes,
-            SelectedItem = Runtimes.FirstOrDefault(runtime => runtime.Id == instance.RuntimeId)
+            SelectedItem = Runtimes.FirstOrDefault(runtime => runtime.Id == instance.RuntimeId),
+            MinWidth = 320,
+            HorizontalAlignment = HorizontalAlignment.Stretch
         };
         var minMemory = new NumberBox { Header = "最小内存 MB", Minimum = 0, Value = instance.LaunchSettings.MinMemoryMb ?? double.NaN };
         var maxMemory = new NumberBox { Header = "最大内存 MB", Minimum = 0, Value = instance.LaunchSettings.MaxMemoryMb ?? double.NaN };
@@ -827,10 +886,10 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
 
     private void ApplyMetricLayout(double width)
     {
-        var wide = width >= 900;
-        var medium = width >= 560;
-        var columnCount = wide ? 3 : medium ? 2 : 1;
-        var rowCount = wide ? 1 : medium ? 2 : 3;
+        var wide = width >= 1160;
+        var medium = width >= 720;
+        var columnCount = wide ? 4 : medium ? 2 : 1;
+        var rowCount = wide ? 1 : medium ? 2 : 4;
 
         for (var index = 0; index < MetricsGrid.ColumnDefinitions.Count; index++)
         {
@@ -855,6 +914,10 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
         Grid.SetColumn(InstallRootMetricCard, wide ? 2 : 0);
         Grid.SetRow(InstallRootMetricCard, wide ? 0 : medium ? 1 : 2);
         Grid.SetColumnSpan(InstallRootMetricCard, medium && !wide ? 2 : 1);
+
+        Grid.SetColumn(PlayTimeMetricCard, wide ? 3 : 0);
+        Grid.SetRow(PlayTimeMetricCard, wide ? 0 : medium ? 2 : 3);
+        Grid.SetColumnSpan(PlayTimeMetricCard, medium && !wide ? 3 : 1);
     }
 
     private void ApplyChannelLayout(double width)
@@ -991,6 +1054,8 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
             existing.Status = task.Status;
             existing.Message = task.Message;
 
+            UpdateTaskbarProgress();
+
             if (task.Status is "finished" or "canceled")
             {
                 _ = Task.Delay(3200).ContinueWith(_task =>
@@ -999,6 +1064,93 @@ public sealed partial class MainPage : Page, INotifyPropertyChanged
                 });
             }
         });
+    }
+
+    private void UpdateTaskbarProgress()
+    {
+        var active = ActiveTasks.FirstOrDefault(t => t.Status is "running" or "paused");
+        var hwnd = MainWindow.WindowHandle;
+
+        if (active is null)
+        {
+            TaskbarProgress.Clear(hwnd);
+            return;
+        }
+
+        if (active.Status == "paused")
+        {
+            TaskbarProgress.Paused(hwnd);
+            return;
+        }
+
+        if (active.TotalBytes is > 0)
+        {
+            TaskbarProgress.Normal(hwnd, active.DownloadedBytes, active.TotalBytes.Value);
+        }
+        else
+        {
+            TaskbarProgress.Indeterminate(hwnd);
+        }
+    }
+
+    private void OnGameExited(string instanceId, TimeSpan sessionDuration)
+    {
+        _ = DispatcherQueue.TryEnqueue(() =>
+        {
+            var instance = InstalledInstances.FirstOrDefault(i => i.Id == instanceId);
+            if (instance is not null)
+            {
+                instance.TotalPlayTimeTicks += sessionDuration.Ticks;
+                instance.IsRunning = false;
+                instance.NotifyRunningStateChanged();
+                PlayTimeMetricValue.Text = TotalPlayTimeDisplay();
+            }
+
+            if (InstalledInstances.All(i => !i.IsRunning))
+            {
+                _runningGameTimer.Stop();
+            }
+
+            SetNotice($"游戏已退出（本次 {sessionDuration:hh\\:mm\\:ss}）");
+        });
+    }
+
+    private void ApplyRunningState()
+    {
+        foreach (var instance in InstalledInstances)
+        {
+            var startTime = _launcher.GetGameStartTime(instance.Id);
+            if (startTime.HasValue)
+            {
+                instance.IsRunning = true;
+                instance.CurrentSessionStart = startTime.Value;
+                instance.NotifyRunningStateChanged();
+            }
+        }
+
+        if (InstalledInstances.Any(i => i.IsRunning))
+        {
+            _runningGameTimer.Start();
+        }
+    }
+
+    private void RefreshRunningDisplay()
+    {
+        foreach (var instance in InstalledInstances.Where(i => i.IsRunning))
+        {
+            instance.NotifyRunningStateChanged();
+        }
+
+        PlayTimeMetricValue.Text = TotalPlayTimeDisplay();
+    }
+
+    private string TotalPlayTimeDisplay()
+    {
+        var totalTicks = InstalledInstances.Sum(i => i.TotalPlayTimeTicks)
+            + InstalledInstances.Where(i => i.IsRunning)
+                .Sum(i => (DateTime.Now - i.CurrentSessionStart).Ticks);
+        var total = TimeSpan.FromTicks(totalTicks);
+        return total.TotalMinutes >= 1 ? $"{(int)total.TotalHours} 小时 {total.Minutes} 分钟" : "暂无";
     }
 
     private static Settings Clone(Settings value)

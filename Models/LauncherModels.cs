@@ -194,7 +194,7 @@ public sealed class RemoteRuntime
     public string DisplayName => $"JRE {JavaVersion} · {Version} · {SizeLabel}";
 }
 
-public sealed class InstalledInstance
+public sealed class InstalledInstance : INotifyPropertyChanged
 {
     public string Id { get; set; } = string.Empty;
     public GameChannel Channel { get; set; }
@@ -204,7 +204,14 @@ public sealed class InstalledInstance
     public string JarPath { get; set; } = string.Empty;
     public string? RuntimeId { get; set; }
     public string InstalledAt { get; set; } = string.Empty;
+    public long TotalPlayTimeTicks { get; set; }
     public LaunchSettings LaunchSettings { get; set; } = new();
+
+    [JsonIgnore]
+    public bool IsRunning { get; set; }
+
+    [JsonIgnore]
+    public DateTime CurrentSessionStart { get; set; }
 
     [JsonIgnore]
     public string ChannelDisplayName => Channel.ToDisplayName();
@@ -216,6 +223,35 @@ public sealed class InstalledInstance
     public string InstalledDisplay => DateTimeOffset.TryParse(InstalledAt, out var value)
         ? value.ToLocalTime().ToString("yyyy-MM-dd HH:mm")
         : "未知时间";
+
+    [JsonIgnore]
+    public string RunningStatusText => IsRunning ? "正在游戏中" : "";
+
+    [JsonIgnore]
+    public string CurrentSessionText => IsRunning
+        ? $"单次 {(DateTime.Now - CurrentSessionStart):hh\\:mm\\:ss}" : "";
+
+    [JsonIgnore]
+    public string TotalPlayText
+    {
+        get
+        {
+            var total = TimeSpan.FromTicks(TotalPlayTimeTicks);
+            if (IsRunning)
+                total += DateTime.Now - CurrentSessionStart;
+            return total.TotalMinutes >= 1 ? $"累计 {(int)total.TotalHours} 小时 {total.Minutes} 分钟" : "";
+        }
+    }
+
+    public event PropertyChangedEventHandler? PropertyChanged;
+
+    public void NotifyRunningStateChanged()
+    {
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsRunning)));
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(RunningStatusText)));
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(CurrentSessionText)));
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(TotalPlayText)));
+    }
 }
 
 public sealed class LaunchSettings
@@ -359,9 +395,17 @@ public sealed class TaskRecord : ObservableObject
             {
                 OnPropertyChanged(nameof(Progress));
                 OnPropertyChanged(nameof(ProgressText));
+                OnPropertyChanged(nameof(IsRunning));
+                OnPropertyChanged(nameof(IsPaused));
             }
         }
     }
+
+    [JsonIgnore]
+    public bool IsRunning => _status == "running";
+
+    [JsonIgnore]
+    public bool IsPaused => _status == "paused";
 
     public string Message
     {

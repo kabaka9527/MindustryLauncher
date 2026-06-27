@@ -7,6 +7,8 @@ public sealed partial class LauncherService
 {
     public async Task<List<RemoteVersion>> RefreshVersionsAsync()
     {
+        AppDebugLog.Info("开始获取版本列表");
+
         var layout = Layout;
         var network = new NetworkClient(_settings, Path.Combine(layout.CacheDir, "http"));
         var instances = await LoadInstancesAsync(layout);
@@ -15,11 +17,19 @@ public sealed partial class LauncherService
         var results = await Task.WhenAll(tasks);
         var refreshed = results.Where(result => result.Versions.Count > 0).ToList();
 
+        foreach (var result in results)
+        {
+            var count = result.Versions.Count;
+            AppDebugLog.Info($"{result.Channel.ToDisplayName()}: {(count > 0 ? $"获取到 {count} 个版本" : $"失败 - {result.Error}")}");
+        }
+
         if (refreshed.Count == 0)
         {
+            AppDebugLog.Warn("所有频道均获取失败，尝试使用缓存版本");
             var cached = await LoadCachedVersionsAsync(layout);
             if (cached.Count > 0)
             {
+                AppDebugLog.Info($"使用缓存版本列表（{cached.Count} 个版本）");
                 return cached;
             }
 
@@ -31,6 +41,7 @@ public sealed partial class LauncherService
         merged.RemoveAll(version => refreshedChannels.Contains(version.Channel));
         merged.AddRange(refreshed.SelectMany(result => result.Versions));
         await SaveCachedVersionsAsync(layout, merged);
+        AppDebugLog.Info($"版本列表已刷新（{merged.Count} 个版本）");
         return merged;
     }
 
