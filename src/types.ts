@@ -78,6 +78,7 @@ export type InstalledInstance = {
   jarPath: string;
   runtimeId?: string | null;
   installedAt: string;
+  requiredJavaVersion?: number | null;
   launchSettings: LaunchSettings;
 };
 
@@ -126,6 +127,12 @@ export type MigrationResult = {
   oldRoot: string;
   newRoot: string;
   copied: boolean;
+};
+
+export type DebugLogEntry = {
+  level: string;
+  message: string;
+  timestamp: string;
 };
 
 export type DebugLogSnapshot = {

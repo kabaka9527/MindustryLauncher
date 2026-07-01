@@ -98,6 +98,7 @@ pub async fn launch_version(
         .current_dir(PathBuf::from(&instance.install_dir))
         .stdout(Stdio::from(stdout))
         .stderr(Stdio::from(stderr))
+        .creation_flags(0x08000000) // CREATE_NO_WINDOW
         .spawn()
         .map_err(|err| AppError::Command(err.to_string()))?;
 
@@ -234,28 +235,7 @@ fn split_command_args(input: &str) -> AppResult<Vec<String>> {
 
 pub fn open_install_root(layout: &InstallLayout) -> AppResult<()> {
     layout.ensure()?;
-    open_path(&layout.root)
-}
-
-fn open_path(path: &Path) -> AppResult<()> {
-    let mut command = if cfg!(target_os = "windows") {
-        let mut command = std::process::Command::new("explorer.exe");
-        command.arg(path);
-        command
-    } else if cfg!(target_os = "macos") {
-        let mut command = std::process::Command::new("open");
-        command.arg(path);
-        command
-    } else {
-        let mut command = std::process::Command::new("xdg-open");
-        command.arg(path);
-        command
-    };
-
-    command
-        .spawn()
-        .map_err(|err| AppError::Command(format!("failed to open {}: {err}", path.display())))?;
-    Ok(())
+    fs_util::open_path(&layout.root)
 }
 
 pub fn open_url(url: &str) -> AppResult<()> {

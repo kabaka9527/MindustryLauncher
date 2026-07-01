@@ -105,3 +105,24 @@ pub fn remove_file_retry(path: &Path) -> AppResult<()> {
             .unwrap_or_else(|| "Unknown IO error".to_string()),
     ))
 }
+
+pub fn open_path(path: &Path) -> AppResult<()> {
+    let mut command = if cfg!(target_os = "windows") {
+        let mut command = std::process::Command::new("explorer.exe");
+        command.arg(path);
+        command
+    } else if cfg!(target_os = "macos") {
+        let mut command = std::process::Command::new("open");
+        command.arg(path);
+        command
+    } else {
+        let mut command = std::process::Command::new("xdg-open");
+        command.arg(path);
+        command
+    };
+
+    command
+        .spawn()
+        .map_err(|err| AppError::Command(format!("failed to open {}: {err}", path.display())))?;
+    Ok(())
+}

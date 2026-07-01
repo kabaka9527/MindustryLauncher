@@ -11,6 +11,11 @@ use reqwest::{
 };
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+
+fn hex_encode(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{:02x}", b)).collect()
+}
+
 use std::{
     collections::HashMap,
     io::ErrorKind,
@@ -485,8 +490,10 @@ impl NetworkClient {
             File::create(tmp).await?
         };
         let mut downloaded = downloaded_offset;
-        let start = Instant::now();
-        let mut last_log = Instant::now();
+        let mut speed_last_bytes = downloaded_offset;
+        let mut speed_last_time = Instant::now();
+        let mut current_speed = 0u64;
+        let mut last_event = Instant::now();
         loop {
             if control.canceled.load(Ordering::SeqCst) {
                 return Ok(DownloadFlow::Canceled);
@@ -513,24 +520,21 @@ impl NetworkClient {
             };
             file.write_all(&chunk).await?;
             downloaded += chunk.len() as u64;
-            let elapsed = start.elapsed().as_secs_f64().max(0.001);
-            let bytes_per_second = ((downloaded - downloaded_offset) as f64 / elapsed) as u64;
-            let _ = on_event.send(TaskEvent::Progress {
-                task_id: task_id.to_string(),
-                downloaded_bytes: downloaded,
-                total_bytes: total,
-                bytes_per_second: Some(bytes_per_second),
-                message: Some("下载中".to_string()),
-            });
-            if last_log.elapsed() >= Duration::from_millis(700) {
-                debug_console::log(format!(
-                    "下载进度: {label}, downloaded={}, total={}",
-                    downloaded,
-                    total
-                        .map(|value| value.to_string())
-                        .unwrap_or_else(|| "unknown".to_string())
-                ));
-                last_log = Instant::now();
+            if speed_last_time.elapsed() >= Duration::from_secs(2) {
+                let elapsed = speed_last_time.elapsed().as_secs_f64().max(0.001);
+                current_speed = ((downloaded - speed_last_bytes) as f64 / elapsed) as u64;
+                speed_last_bytes = downloaded;
+                speed_last_time = Instant::now();
+            }
+            if last_event.elapsed() >= Duration::from_millis(300) {
+                let _ = on_event.send(TaskEvent::Progress {
+                    task_id: task_id.to_string(),
+                    downloaded_bytes: downloaded,
+                    total_bytes: total,
+                    bytes_per_second: Some(current_speed),
+                    message: Some("下载中".to_string()),
+                });
+                last_event = Instant::now();
             }
         }
         file.flush().await?;
@@ -539,54 +543,25 @@ impl NetworkClient {
     }
 
     async fn resolve_download_size(&self, url: &str) -> AppResult<Option<u64>> {
-        let head = self
+        let response = self
             .client
             .head(url)
             .header(ACCEPT_ENCODING, "identity")
             .send()
-            .await;
-        if let Ok(response) = head {
-            if response.status().is_success() {
-                if let Some(size) = response.content_length().filter(|value| *value > 0) {
-                    return Ok(Some(size));
-                }
-                if let Some(size) = response
-                    .headers()
-                    .get(CONTENT_LENGTH)
-                    .and_then(|value| value.to_str().ok())
-                    .and_then(|value| value.parse::<u64>().ok())
-                    .filter(|value| *value > 0)
-                {
-                    return Ok(Some(size));
-                }
-            }
-        }
-
-        let response = self
-            .client
-            .get(url)
-            .header(ACCEPT_ENCODING, "identity")
-            .header(RANGE, "bytes=0-0")
-            .send()
             .await?;
-        if response.status() == StatusCode::PARTIAL_CONTENT {
-            if let Some(size) = response
-                .headers()
-                .get(CONTENT_RANGE)
-                .and_then(|value| value.to_str().ok())
-                .and_then(parse_content_range_total)
-            {
-                return Ok(Some(size));
-            }
-        }
-        Ok(response.content_length().filter(|value| *value > 0))
+        Ok(response
+            .headers()
+            .get(CONTENT_LENGTH)
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.parse::<u64>().ok())
+            .filter(|size| *size > 0))
     }
 
     fn cache_path_for(&self, url: &str) -> PathBuf {
         let mut hasher = Sha256::new();
         hasher.update(url.as_bytes());
         self.cache_dir
-            .join(format!("{}.json", hex::encode(hasher.finalize())))
+            .join(format!("{}.json", hex_encode(&hasher.finalize())))
     }
 }
 
@@ -610,7 +585,7 @@ pub async fn verify_file_digest(path: &Path, expected_digest: &str) -> AppResult
         }
         hasher.update(&buffer[..read]);
     }
-    let actual = hex::encode(hasher.finalize());
+    let actual = hex_encode(&hasher.finalize());
     if actual == expected {
         Ok(())
     } else {

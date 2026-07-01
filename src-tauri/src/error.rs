@@ -3,6 +3,16 @@ use thiserror::Error;
 
 pub type AppResult<T> = Result<T, AppError>;
 
+macro_rules! impl_from {
+    ($variant:ident, $ty:ty) => {
+        impl From<$ty> for AppError {
+            fn from(value: $ty) -> Self {
+                Self::$variant(value.to_string())
+            }
+        }
+    };
+}
+
 #[derive(Debug, Error)]
 pub enum AppError {
     #[error("I/O error: {0}")]
@@ -28,38 +38,9 @@ impl Serialize for AppError {
     }
 }
 
-impl From<std::io::Error> for AppError {
-    fn from(value: std::io::Error) -> Self {
-        Self::Io(value.to_string())
-    }
-}
-
-impl From<serde_json::Error> for AppError {
-    fn from(value: serde_json::Error) -> Self {
-        Self::Json(value.to_string())
-    }
-}
-
-impl From<reqwest::Error> for AppError {
-    fn from(value: reqwest::Error) -> Self {
-        Self::Network(value.to_string())
-    }
-}
-
-impl From<url::ParseError> for AppError {
-    fn from(value: url::ParseError) -> Self {
-        Self::Invalid(value.to_string())
-    }
-}
-
-impl From<tauri::Error> for AppError {
-    fn from(value: tauri::Error) -> Self {
-        Self::Command(value.to_string())
-    }
-}
-
-impl From<zip::result::ZipError> for AppError {
-    fn from(value: zip::result::ZipError) -> Self {
-        Self::Invalid(value.to_string())
-    }
-}
+impl_from!(Io, std::io::Error);
+impl_from!(Json, serde_json::Error);
+impl_from!(Network, reqwest::Error);
+impl_from!(Invalid, url::ParseError);
+impl_from!(Command, tauri::Error);
+impl_from!(Invalid, zip::result::ZipError);

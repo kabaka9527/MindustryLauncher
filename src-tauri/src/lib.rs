@@ -54,7 +54,10 @@ async fn save_settings(
     let layout = config::layout_from_settings(&saved)?;
     debug_console::set_log_path(layout.logs_dir.join("debug.log"));
     if previous.debug_mode != saved.debug_mode {
-        debug_console::info("调试模式设置已变更，重启启动器后生效");
+        debug_console::set_enabled(saved.debug_mode);
+        if saved.debug_mode {
+            debug_console::section("调试模式已即时开启");
+        }
     }
     *state.settings.write().await = saved.clone();
     Ok(saved)
@@ -65,6 +68,7 @@ async fn refresh_accelerators(state: State<'_, LauncherState>) -> AppResult<Acce
     let settings = state.settings.read().await.clone();
     let layout = config::layout_from_settings(&settings)?;
     let list = accelerators::refresh_accelerators(&settings, &layout).await?;
+    debug_console::info(format!("加速源刷新完成，共 {} 个加速源", list.sources.len()));
     *state.accelerators.write().await = list.clone();
     Ok(list)
 }
@@ -92,6 +96,7 @@ async fn startup_refresh_versions(
         .await
         {
             Ok(versions) => {
+                debug_console::info(format!("版本刷新完成，共 {} 个版本", versions.len()));
                 let _ = app.emit("versions-refreshed", versions);
             }
             Err(err) => {
@@ -104,8 +109,7 @@ async fn startup_refresh_versions(
         }
     });
 
-    // Return cached versions immediately so the frontend can display
-    // something while the background refresh is in progress.
+    // Return cached versions
     versions::load_cached_versions(&layout)
 }
 
@@ -169,6 +173,35 @@ async fn list_remote_runtimes(state: State<'_, LauncherState>) -> AppResult<Vec<
     let settings = state.settings.read().await.clone();
     let layout = config::layout_from_settings(&settings)?;
     runtime::list_remote_runtimes(&settings, &layout).await
+}
+
+#[tauri::command(rename_all = "camelCase")]
+async fn startup_refresh_runtimes(
+    app: AppHandle,
+    state: State<'_, LauncherState>,
+) -> AppResult<Vec<RemoteRuntime>> {
+    let settings = state.settings.read().await.clone();
+    let layout = config::layout_from_settings(&settings)?;
+
+    let bg_layout = layout.clone();
+    tokio::spawn(async move {
+        match runtime::list_remote_runtimes(&settings, &bg_layout).await {
+            Ok(runtimes) => {
+                debug_console::info(format!("运行时刷新完成，共 {} 个远端运行时", runtimes.len()));
+                let _ = app.emit("runtimes-refreshed", runtimes);
+            }
+            Err(err) => {
+                let cached =
+                    runtime::load_cached_remote_runtimes(&bg_layout).unwrap_or_default();
+                if !cached.is_empty() {
+                    let _ = app.emit("runtimes-refreshed", cached);
+                }
+                debug_console::warn(format!("后台运行时刷新失败：{err}"));
+            }
+        }
+    });
+
+    runtime::load_cached_remote_runtimes(&layout)
 }
 
 #[tauri::command(rename_all = "camelCase")]
@@ -295,11 +328,6 @@ fn open_debug_log_dir() -> AppResult<()> {
 }
 
 #[tauri::command(rename_all = "camelCase")]
-fn open_debug_log_window(app: AppHandle) -> AppResult<()> {
-    debug_console::open_debug_window(&app)
-}
-
-#[tauri::command(rename_all = "camelCase")]
 fn pause_download(task_id: String) -> AppResult<()> {
     network::pause_download_task(&task_id)
 }
@@ -339,6 +367,17 @@ async fn ignore_launcher_version(
     Ok(saved)
 }
 
+#[tauri::command(rename_all = "camelCase")]
+fn emit_frontend_log(level: String, message: String) -> AppResult<()> {
+    let msg = format!("[前端] {message}");
+    match level.to_lowercase().as_str() {
+        "warn" | "warning" => debug_console::warn(msg),
+        "error" | "err" => debug_console::error(msg),
+        _ => debug_console::info(msg),
+    }
+    Ok(())
+}
+
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -349,6 +388,7 @@ pub fn run() {
             let layout = config::layout_from_settings(&settings)?;
             layout.ensure()?;
             instances::cleanup_partial_downloads(&layout)?;
+            debug_console::set_app_handle(app_handle.clone());
             debug_console::set_log_path(layout.logs_dir.join("debug.log"));
             if settings.debug_mode {
                 debug_console::start_session()?;
@@ -357,7 +397,6 @@ pub fn run() {
                 debug_console::info(format!("安装根目录：{}", layout.root.display()));
                 debug_console::info(format!("缓存目录：{}", layout.cache_dir.display()));
                 debug_console::info(format!("运行时目录：{}", layout.runtimes_dir.display()));
-                debug_console::open_debug_window(&app_handle)?;
             } else {
                 debug_console::set_enabled(false);
             }
@@ -390,6 +429,7 @@ pub fn run() {
             switch_version,
             ensure_runtime,
             list_remote_runtimes,
+            startup_refresh_runtimes,
             install_runtime,
             import_runtime,
             scan_runtimes,
@@ -404,7 +444,7 @@ pub fn run() {
             read_debug_log,
             clear_debug_log,
             open_debug_log_dir,
-            open_debug_log_window,
+            emit_frontend_log,
             pause_download,
             resume_download,
             cancel_download,

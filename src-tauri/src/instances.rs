@@ -71,6 +71,7 @@ pub async fn install_version(
             jar_path: jar_path.to_string_lossy().to_string(),
             runtime_id: Some(runtime_info.id),
             installed_at: Utc::now().to_rfc3339(),
+            required_java_version: Some(required_java),
             launch_settings: LaunchSettings::default(),
         };
 

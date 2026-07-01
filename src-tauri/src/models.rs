@@ -57,16 +57,7 @@ impl Default for ChannelVisibility {
     }
 }
 
-impl ChannelVisibility {
-    pub fn is_visible(&self, channel: GameChannel, show_be: bool) -> bool {
-        match channel {
-            GameChannel::Mindustry => self.mindustry,
-            GameChannel::MindustryX => self.mindustry_x,
-            GameChannel::MindustryBE => show_be && self.mindustry_be,
-            GameChannel::MindustryXBE => show_be && self.mindustry_xbe,
-        }
-    }
-}
+
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -240,6 +231,8 @@ pub struct InstalledInstance {
     pub jar_path: String,
     pub runtime_id: Option<String>,
     pub installed_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub required_java_version: Option<u16>,
     #[serde(default)]
     pub launch_settings: LaunchSettings,
 }

@@ -83,10 +83,15 @@ async fn fetch_accelerator_list_from_urls(
     let mut last_error = None;
     while let Some(res) = set.join_next().await {
         match res {
-            Ok((Ok(remote), _)) => match validate_accelerator_list(remote) {
-                Ok(list) => return Ok(ensure_required_sources(list)),
-                Err(err) => last_error = Some(err),
-            },
+            Ok((Ok(remote), _)) => {
+            if remote.sources.is_empty() {
+                last_error = Some(AppError::Invalid(
+                    "GitHub accelerator list has no sources".to_string(),
+                ));
+            } else {
+                return Ok(ensure_required_sources(remote));
+            }
+        }
             Ok((Err(err), _)) => last_error = Some(err),
             Err(e) => last_error = Some(AppError::Network(e.to_string())),
         }
@@ -111,10 +116,6 @@ pub fn bundled_accelerators() -> AcceleratorList {
 
 fn parse_bundled_accelerators() -> AppResult<AcceleratorList> {
     let list = serde_json::from_str::<AcceleratorList>(BUNDLED_ACCELERATORS_JSON)?;
-    validate_accelerator_list(list)
-}
-
-fn validate_accelerator_list(list: AcceleratorList) -> AppResult<AcceleratorList> {
     if list.sources.is_empty() {
         return Err(AppError::Invalid(
             "GitHub accelerator list has no sources".to_string(),

@@ -11,7 +11,7 @@ use std::{
         Mutex, Once, OnceLock,
     },
 };
-use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri::{AppHandle, Emitter};
 
 const DEFAULT_TAIL_LINES: usize = 600;
 const MAX_TAIL_LINES: usize = 2_000;
@@ -24,6 +24,7 @@ static LOG_STATE: Mutex<DebugLogState> = Mutex::new(DebugLogState {
     session_id: None,
     started_at: None,
 });
+static APP_HANDLE: OnceLock<AppHandle> = OnceLock::new();
 static PANIC_HOOK: Once = Once::new();
 
 #[derive(Debug, Clone)]
@@ -66,6 +67,23 @@ pub fn set_log_path(path: PathBuf) {
     }
     if let Ok(mut state) = LOG_STATE.lock() {
         state.log_path = Some(path);
+    }
+}
+
+pub fn set_app_handle(app: AppHandle) {
+    let _ = APP_HANDLE.set(app);
+}
+
+fn emit_entry(level: &DebugLevel, message: &str) {
+    if let Some(app) = APP_HANDLE.get() {
+        let _ = app.emit(
+            "debug-log-entry",
+            serde_json::json!({
+                "level": level.label(),
+                "message": message,
+                "timestamp": Local::now().to_rfc3339(),
+            }),
+        );
     }
 }
 
@@ -191,25 +209,8 @@ pub fn open_log_dir() -> AppResult<()> {
     };
     if let Some(parent) = path.parent() {
         fs_util::ensure_dir(parent)?;
-        open_path(parent)?;
+        fs_util::open_path(parent)?;
     }
-    Ok(())
-}
-
-pub fn open_debug_window(app: &AppHandle) -> AppResult<()> {
-    if let Some(window) = app.get_webview_window("debug-log") {
-        let _ = window.show();
-        let _ = window.set_focus();
-        return Ok(());
-    }
-
-    WebviewWindowBuilder::new(app, "debug-log", WebviewUrl::App("index.html".into()))
-        .title("Mindustry Launcher 调试控制台")
-        .inner_size(940.0, 560.0)
-        .min_inner_size(720.0, 420.0)
-        .resizable(true)
-        .center()
-        .build()?;
     Ok(())
 }
 
@@ -225,9 +226,11 @@ fn write_entry(level: DebugLevel, message: impl AsRef<str>, force: bool) {
     }
     let _ = rotate_if_large(&path);
 
+    let message = redact_sensitive(message.as_ref());
+    emit_entry(&level, &message);
+
     let timestamp = Local::now().format("%Y-%m-%d %H:%M:%S%.3f");
     let pid = std::process::id();
-    let message = redact_sensitive(message.as_ref());
     let line = format!("[{timestamp}] [{}] [pid:{pid}] {message}", level.label());
     if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(path) {
         let _ = writeln!(file, "{line}");
@@ -328,26 +331,7 @@ fn sensitive_query_regex() -> &'static Regex {
     })
 }
 
-fn open_path(path: &Path) -> AppResult<()> {
-    let mut command = if cfg!(target_os = "windows") {
-        let mut command = std::process::Command::new("explorer.exe");
-        command.arg(path);
-        command
-    } else if cfg!(target_os = "macos") {
-        let mut command = std::process::Command::new("open");
-        command.arg(path);
-        command
-    } else {
-        let mut command = std::process::Command::new("xdg-open");
-        command.arg(path);
-        command
-    };
 
-    command.spawn().map_err(|err| {
-        crate::error::AppError::Command(format!("failed to open {}: {err}", path.display()))
-    })?;
-    Ok(())
-}
 
 #[cfg(test)]
 mod tests {

@@ -73,6 +73,10 @@ impl InstallLayout {
     pub fn versions_cache_path(&self) -> PathBuf {
         self.cache_dir.join("versions.json")
     }
+
+    pub fn remote_runtimes_cache_path(&self) -> PathBuf {
+        self.cache_dir.join("remote-runtimes.json")
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]

@@ -1,9 +1,9 @@
 import { Channel } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
-import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   AlertTriangle,
   Ban,
+  Bug,
   Cpu,
   CheckCircle2,
   Cloud,
@@ -34,13 +34,14 @@ import {
   clearDebugLog,
   deleteInstance,
   deleteRuntime,
+  emitFrontendLog,
   getAppState,
   ignoreLauncherVersion,
   importRuntime,
   installVersion,
   installRuntime,
   launchVersion,
-  listRemoteRuntimes,
+  onDebugLogEntry,
   openDebugLogDir,
   migrateInstallRoot,
   openInstallRoot,
@@ -50,7 +51,9 @@ import {
   refreshAccelerators,
   refreshVersions,
   startupRefreshVersions,
+  startupRefreshRuntimes,
   onVersionsRefreshed,
+  onRuntimesRefreshed,
   resumeDownload,
   scanRuntimes,
   saveInstanceLaunchSettings,
@@ -61,6 +64,7 @@ import {
 import type {
   AppUiState,
   ChannelVisibility,
+  DebugLogEntry,
   DebugLogSnapshot,
   GameChannel,
   InstalledInstance,
@@ -79,8 +83,9 @@ import coreSprite from "./assets/mindustry/core-shard.png";
 import lancerSprite from "./assets/mindustry/lancer.png";
 import zenithSprite from "./assets/mindustry/zenith.png";
 import { useTheme } from "./hooks/useTheme";
+import TitleBar from "./TitleBar";
 
-type View = "games" | "versions" | "settings";
+type View = "games" | "versions" | "runtimes" | "settings" | "debug";
 
 type RuntimeConflict = {
   key: string;
@@ -135,19 +140,13 @@ const channelVisibilityKeys: Array<{
   { key: "mindustryXbe", channel: "mindustryXBE", label: "MindustryX BE" },
 ];
 
-function isDebugLogWindow() {
+function logFrontend(level: string, message: string) {
   try {
-    return getCurrentWindow().label === "debug-log";
-  } catch {
-    return false;
-  }
+    emitFrontendLog(level, message)
+  } catch { /* ignore in web/dev */ }
 }
 
 export default function App() {
-  if (isDebugLogWindow()) {
-    return <DebugLogWindow />;
-  }
-
   const { theme, setTheme, isDark } = useTheme();
 
   const [view, setView] = useState<View>("games");
@@ -159,7 +158,8 @@ export default function App() {
   const [startupAcceleratorsRefreshDone, setStartupAcceleratorsRefreshDone] = useState(false);
   const [remoteRuntimes, setRemoteRuntimes] = useState<RemoteRuntime[]>([]);
   const [selectedRuntimeId, setSelectedRuntimeId] = useState("");
-  const [runtimeCatalogLoaded, setRuntimeCatalogLoaded] = useState(false);
+  const [versionsRefreshedAt, setVersionsRefreshedAt] = useState(0);
+  const [runtimesRefreshedAt, setRuntimesRefreshedAt] = useState(0);
   const [runtimeGuideOpen, setRuntimeGuideOpen] = useState(false);
   const [editingInstanceId, setEditingInstanceId] = useState<string | null>(null);
   const [deleteConfirmation, setDeleteConfirmation] = useState<DeleteConfirmation | null>(null);
@@ -180,31 +180,15 @@ export default function App() {
     return next;
   }, []);
 
-  const loadRuntimeCatalog = useCallback(async (force = false) => {
-    if (runtimeCatalogLoaded && !force) {
-      return;
-    }
-    setBusy((current) => current ?? "runtimeCatalog");
-    try {
-      const runtimes = await listRemoteRuntimes();
-      setRemoteRuntimes(runtimes);
-      setSelectedRuntimeId((current) => {
-        if (current && runtimes.some((runtime) => runtime.id === current)) {
-          return current;
-        }
-        return (
-          runtimes.find((runtime) => runtime.javaVersion === 17)?.id ??
-          runtimes[0]?.id ??
-          ""
-        );
-      });
-      setRuntimeCatalogLoaded(true);
-    } catch (error) {
-      setNotice(toMessage(error));
-    } finally {
-      setBusy((current) => (current === "runtimeCatalog" ? null : current));
-    }
-  }, [runtimeCatalogLoaded]);
+  async function refreshRuntimesInBackground() {
+    logFrontend("info", "后台运行时列表刷新已触发");
+    const cached = await startupRefreshRuntimes();
+    setRemoteRuntimes(cached);
+    setSelectedRuntimeId((current) => {
+      if (current && cached.some((runtime) => runtime.id === current)) return current;
+      return cached.find((runtime) => runtime.javaVersion === 17)?.id ?? cached[0]?.id ?? "";
+    });
+  }
 
   useEffect(() => {
     reload()
@@ -241,11 +225,25 @@ export default function App() {
       .catch(() => {});
   }, [startupUpdateCheckDone, state]);
 
+  const [startupRuntimesRefreshDone, setStartupRuntimesRefreshDone] = useState(false);
   useEffect(() => {
-    if (state && !runtimeCatalogLoaded) {
-      void loadRuntimeCatalog();
-    }
-  }, [loadRuntimeCatalog, runtimeCatalogLoaded, state]);
+    if (!state || startupRuntimesRefreshDone) return;
+    setStartupRuntimesRefreshDone(true);
+    refreshRuntimesInBackground().catch((error) => setNotice(toMessage(error)));
+  }, [startupRuntimesRefreshDone, state]);
+
+  useEffect(() => {
+    const unlisten = onRuntimesRefreshed((runtimes) => {
+      setRemoteRuntimes(runtimes);
+      setSelectedRuntimeId((current) => {
+        if (current && runtimes.some((r) => r.id === current)) return current;
+        return runtimes.find((r) => r.javaVersion === 17)?.id ?? runtimes[0]?.id ?? "";
+      });
+      setRuntimesRefreshedAt(Date.now());
+      logFrontend("info", `远端运行时数据到达：${runtimes.length} 个运行时`);
+    });
+    return () => { unlisten.then((fn) => fn()); };
+  }, []);
 
   useEffect(() => {
     if (!state || startupAcceleratorsRefreshDone) {
@@ -265,7 +263,11 @@ export default function App() {
         ? "已安装游戏列表已就绪"
         : view === "versions"
           ? "选择版本进行切换"
-          : "管理安装目录、加速源与运行时环境",
+          : view === "runtimes"
+            ? "管理本地与远端 Java 运行时"
+            : view === "debug"
+              ? "调试控制台已打开"
+              : "管理安装目录、加速源与运行时环境",
     );
   }, [view]);
 
@@ -301,6 +303,8 @@ export default function App() {
   useEffect(() => {
     const unlisten = onVersionsRefreshed((versions) => {
       setState((current) => (current ? { ...current, versions } : current));
+      setVersionsRefreshedAt(Date.now());
+      logFrontend("info", `远端版本数据到达：${versions.length} 个版本`);
     });
     return () => {
       unlisten.then((fn) => fn());
@@ -360,6 +364,9 @@ export default function App() {
 
   const handleTaskEvent = useCallback((message: TaskEvent) => {
     const taskId = message.data.taskId;
+    if (message.event === "failed") {
+      logFrontend("error", `[下载] ${taskId}: ${(message.data as Record<string, unknown>).message ?? ""}`);
+    }
     setTasks((current) => {
       if (message.event === "started") {
         return {
@@ -401,7 +408,6 @@ export default function App() {
             ...existing,
             downloadedBytes: message.data.downloadedBytes,
             totalBytes: message.data.totalBytes ?? existing.totalBytes,
-            bytesPerSecond: undefined,
             status: "paused",
             message: message.data.message,
           },
@@ -448,7 +454,7 @@ export default function App() {
           delete next[taskId];
           return next;
         });
-      }, 3200);
+      }, 5000);
     }
   }, []);
 
@@ -507,17 +513,30 @@ export default function App() {
     }
   }
 
+  function onDismissTask(taskId: string) {
+    setTasks((current) => {
+      const next = { ...current };
+      delete next[taskId];
+      return next;
+    });
+  }
+
   async function onRefreshVersions() {
-    await runWithBusy("versions", async () => {
-      const [accelerators, versions] = await Promise.all([
-        refreshAccelerators(),
-        refreshVersions(),
-      ]);
-      setState((current) => (current ? { ...current, accelerators, versions } : current));
-    }, "版本列表已刷新");
+    logFrontend("info", "用户触发了版本列表刷新");
+    setNotice("版本列表正在后台刷新");
+    const cached = await startupRefreshVersions();
+    logFrontend("info", `版本列表刷新响应：缓存 ${cached.length} 个版本`);
+    setState((current) => (current ? { ...current, versions: cached } : current));
+    refreshAccelerators()
+      .then((accelerators) => {
+        logFrontend("info", `加速源刷新响应：${accelerators.sources.length} 个加速源`);
+        setState((current) => (current ? { ...current, accelerators } : current));
+      })
+      .catch(() => {});
   }
 
   async function onRefreshAccelerators() {
+    logFrontend("info", "用户触发了加速源刷新");
     await runWithBusy("accelerators", async () => {
       const accelerators = await refreshAccelerators();
       setState((current) => (current ? { ...current, accelerators } : current));
@@ -539,18 +558,12 @@ export default function App() {
     if (!nextDraft) {
       return;
     }
-    const previousDebugMode = state?.settings.debugMode;
     await runWithBusy("settings", async () => {
       const saved = await applySettings(nextDraft, false);
-      if (previousDebugMode !== undefined && previousDebugMode !== saved.debugMode) {
-        setNotice(
-          saved.debugMode
-            ? "调试模式已保存，重启启动器后会打开独立日志窗口"
-            : "调试模式已关闭，重启启动器后停止打开日志窗口",
-        );
-      } else {
-        setNotice("设置已保存");
+      if (saved.debugMode) {
+        logFrontend("info", "调试模式已即时开启");
       }
+      setNotice(saved.debugMode ? "调试模式已开启，日志窗口同步打开" : "设置已保存");
     });
   }
 
@@ -797,6 +810,7 @@ export default function App() {
   }
 
   async function handleCheckUpdate() {
+    logFrontend("info", "用户触发了启动器更新检查");
     await runWithBusy("checkUpdate", async () => {
       try {
         const info = await checkLauncherUpdate();
@@ -885,16 +899,29 @@ export default function App() {
   );
   const editingInstance = editingInstanceId ? (instancesById.get(editingInstanceId) ?? null) : null;
   const pageTitle =
-    view === "games" ? "游戏" : view === "versions" ? "版本列表" : "启动器设置";
+    view === "games"
+      ? "游戏"
+      : view === "versions"
+        ? "版本列表"
+        : view === "runtimes"
+          ? "运行时"
+          : view === "debug"
+            ? "调试控制台"
+            : "启动器设置";
   const pageNotice =
     view === "games"
       ? installedInstances.length > 0
         ? `已安装 ${installedInstances.length} 个游戏版本`
         : "暂无已安装游戏，打开版本列表选择安装"
-      : notice;
+      : view === "runtimes"
+        ? "管理本地与远端 Java 运行时"
+        : view === "debug"
+          ? "实时日志流"
+          : notice;
 
   return (
     <div className="app-shell">
+      <TitleBar />
       <div className="animated-backdrop" aria-hidden="true">
         <div className="sector-plate sector-plate-a" />
         <div className="sector-plate sector-plate-b" />
@@ -942,16 +969,40 @@ export default function App() {
           <span>版本列表</span>
         </button>
         <button
+          className={view === "runtimes" ? "nav-button active" : "nav-button"}
+          onClick={() => {
+            setView("runtimes");
+            setNotice("管理本地与远端 Java 运行时");
+          }}
+          title="运行时"
+        >
+          <Cpu size={18} />
+          <span>运行时</span>
+        </button>
+        <button
           className={view === "settings" ? "nav-button active" : "nav-button"}
           onClick={() => {
             setView("settings");
-            setNotice("管理安装目录、加速源与运行时环境");
+            setNotice("管理安装目录与加速源");
           }}
           title="设置"
         >
           <SettingsIcon size={18} />
           <span>设置</span>
         </button>
+        {state?.settings.debugMode && (
+          <button
+            className={view === "debug" ? "nav-button active" : "nav-button"}
+            onClick={() => {
+              setView("debug");
+              setNotice("调试控制台已打开");
+            }}
+            title="调试"
+          >
+            <Bug size={18} />
+            <span>调试</span>
+          </button>
+        )}
         <div className="sidebar-footer">
           <span>{state?.instances.length ?? 0} 个实例</span>
           <span>{state?.runtimes.length ?? 0} 个运行时</span>
@@ -965,9 +1016,6 @@ export default function App() {
             <p>{pageNotice}</p>
           </div>
           <div className="top-actions">
-            <span className="theme-indicator" title={theme === "system" ? "主题：跟随系统" : theme === "dark" ? "主题：黑夜模式" : "主题：白天模式"}>
-              {isDark ? <Moon size={13} /> : <Sun size={13} />}
-            </span>
             {view === "games" && (
               <IconButton
                 title="打开版本列表"
@@ -978,14 +1026,18 @@ export default function App() {
               </IconButton>
             )}
             {view === "versions" && (
-              <IconButton
-                title="刷新版本列表"
-                label="刷新"
-                busy={busy === "versions" || busy === "startupRefresh"}
-                onClick={onRefreshVersions}
-              >
-                <RefreshCcw size={17} />
-              </IconButton>
+              <>
+                {versionsRefreshedAt > 0 && (
+                  <span className="refresh-timestamp">上次刷新 {formatRefreshTime(versionsRefreshedAt)}</span>
+                )}
+                <IconButton
+                  title="刷新版本列表"
+                  label="刷新"
+                  onClick={onRefreshVersions}
+                >
+                  <RefreshCcw size={17} />
+                </IconButton>
+              </>
             )}
           </div>
         </header>
@@ -1060,51 +1112,6 @@ export default function App() {
                 })
               )}
             </div>
-
-            <aside className="side-panel">
-              <section className="panel-section">
-                <div className="section-title">
-                  <span>任务</span>
-                  <span>{taskList.length}</span>
-                </div>
-                {taskList.length === 0 ? (
-                  <p className="muted">暂无任务</p>
-                ) : (
-                  taskList.map((task) => (
-                    <TaskItem
-                      key={task.id}
-                      task={task}
-                      onPause={onPauseTask}
-                      onResume={onResumeTask}
-                      onCancel={onCancelTask}
-                    />
-                  ))
-                )}
-              </section>
-              <section className="panel-section">
-                <div className="section-title">
-                  <span>运行时</span>
-                  <span>{(state?.runtimes ?? []).filter((runtime) => runtime.enabled).length}</span>
-                </div>
-                {runtimeConflicts.length > 0 && (
-                  <RuntimeConflictNotice conflicts={runtimeConflicts} compact />
-                )}
-                {pendingRuntimeConflicts.length > 0 && (
-                  <PendingRuntimeConflictNotice conflicts={pendingRuntimeConflicts} compact />
-                )}
-                <RuntimePanel
-                  runtimes={remoteRuntimeOptions}
-                  allRemoteRuntimes={remoteRuntimes}
-                  installed={state?.runtimes ?? []}
-                  runtimeConflicts={runtimeConflicts}
-                  pendingRuntimeConflicts={pendingRuntimeConflicts}
-                  busy={busy}
-                  onRefresh={() => loadRuntimeCatalog(true)}
-                  onInstall={installRemoteRuntime}
-                  onReinstall={onReinstallRuntime}
-                />
-              </section>
-            </aside>
           </section>
         ) : view === "versions" ? (
           <section className="version-browser">
@@ -1181,6 +1188,21 @@ export default function App() {
               )}
             </div>
           </section>
+        ) : view === "runtimes" ? (
+          <RuntimesView
+            runtimes={state?.runtimes ?? []}
+            remoteRuntimes={remoteRuntimes}
+            runtimeConflicts={runtimeConflicts}
+            busy={busy}
+            refreshedAt={runtimesRefreshedAt}
+            onImportRuntime={onImportRuntime}
+            onScanRuntimes={onScanRuntimes}
+            onRefreshRuntimeCatalog={() => { setNotice("运行时列表正在后台刷新"); void refreshRuntimesInBackground(); }}
+            onToggleRuntimeEnabled={onToggleRuntimeEnabled}
+            onReinstallRuntime={onReinstallRuntime}
+            onDeleteRuntime={onDeleteRuntime}
+            onInstallRemoteRuntime={installRemoteRuntime}
+          />
         ) : (
           <SettingsView
             state={state}
@@ -1192,13 +1214,15 @@ export default function App() {
             onSave={() => onSaveSettings()}
             onImportRuntime={onImportRuntime}
             onScanRuntimes={onScanRuntimes}
-            onRefreshRuntimeCatalog={() => loadRuntimeCatalog(true)}
+            onRefreshRuntimeCatalog={() => { setNotice("运行时列表正在后台刷新"); void refreshRuntimesInBackground(); }}
             onRefreshAccelerators={onRefreshAccelerators}
             onToggleRuntimeEnabled={onToggleRuntimeEnabled}
             onReinstallRuntime={onReinstallRuntime}
             onDeleteRuntime={onDeleteRuntime}
+            onInstallRemoteRuntime={installRemoteRuntime}
             remoteRuntimes={remoteRuntimes}
             runtimeConflicts={runtimeConflicts}
+            refreshedAt={runtimesRefreshedAt}
             onPickInstallRoot={onPickInstallRoot}
             onOpenInstallRoot={() => {
               void runWithBusy("openRoot", openInstallRoot);
@@ -1207,6 +1231,9 @@ export default function App() {
             updateInfo={updateInfo}
           />
         )}
+        <div className="debug-view" style={{ display: view === "debug" ? "grid" : "none" }}>
+          <DebugLogWindow />
+        </div>
         {runtimeGuideOpen && state && (
           <RuntimeGuide
             runtimes={remoteRuntimeOptions}
@@ -1216,7 +1243,7 @@ export default function App() {
             onDownload={() => onInstallSelectedRuntime()}
             onGoImport={() => {
               setRuntimeGuideOpen(false);
-              setView("settings");
+              setView("runtimes");
             }}
             onDismiss={onDismissRuntimeGuide}
             onClose={() => setRuntimeGuideOpen(false)}
@@ -1262,6 +1289,15 @@ export default function App() {
           </div>
         </div>
       )}
+      {taskList.length > 0 && (
+        <DownloadPanel
+          tasks={taskList}
+          onPause={onPauseTask}
+          onResume={onResumeTask}
+          onCancel={onCancelTask}
+          onDismiss={onDismissTask}
+        />
+      )}
       {showUpdatePrompt && updateInfo && (
         <UpdatePromptModal
           info={updateInfo}
@@ -1273,45 +1309,76 @@ export default function App() {
   );
 }
 
+function DownloadPanel({
+  tasks,
+  onPause,
+  onResume,
+  onCancel,
+  onDismiss,
+}: {
+  tasks: TaskRecord[];
+  onPause: (taskId: string) => void;
+  onResume: (taskId: string) => void;
+  onCancel: (taskId: string) => void;
+  onDismiss: (taskId: string) => void;
+}) {
+  return (
+    <div className="download-panel-layer">
+      <div className="download-panel glass-panel">
+        <div className="download-panel-head">
+          <Download size={15} />
+          <span>下载任务</span>
+          <span className="download-panel-count">{tasks.length}</span>
+        </div>
+        {tasks.map((task) => (
+          <TaskItem
+            key={task.id}
+            task={task}
+            onPause={onPause}
+            onResume={onResume}
+            onCancel={onCancel}
+            onDismiss={onDismiss}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function DebugLogWindow() {
-  const [snapshot, setSnapshot] = useState<DebugLogSnapshot | null>(null);
+  const [entries, setEntries] = useState<DebugLogEntry[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [autoScroll, setAutoScroll] = useState(true);
   const [busy, setBusy] = useState<"clear" | "dir" | null>(null);
+  const [enabled, setEnabled] = useState(false);
   const logRef = useRef<HTMLPreElement | null>(null);
 
-  const refresh = useCallback(async () => {
-    try {
-      const next = await readDebugLog();
-      setSnapshot(next);
-      setError(null);
-    } catch (error) {
-      setError(toMessage(error));
-    }
-  }, []);
-
   useEffect(() => {
-    document.body.classList.add("debug-log-body");
-    let alive = true;
-    async function refreshIfAlive() {
-      try {
-        const next = await readDebugLog();
-        if (alive) {
-          setSnapshot(next);
-          setError(null);
+    readDebugLog()
+      .then((snapshot) => {
+        setEnabled(snapshot.enabled);
+        if (snapshot.content.trim()) {
+          setEntries([{
+            level: "FILE",
+            message: snapshot.content.trim(),
+            timestamp: "",
+          }]);
         }
-      } catch (error) {
-        if (alive) {
-          setError(toMessage(error));
+      })
+      .catch(() => {});
+
+    const unlisten = onDebugLogEntry((entry) => {
+      setEnabled(true);
+      setEntries((prev) => {
+        if (prev.length === 1 && prev[0].level === "FILE") {
+          return [prev[0], { level: "FILE", message: "──── 实时事件 ────", timestamp: "" }, entry];
         }
-      }
-    }
-    void refreshIfAlive();
-    const timer = window.setInterval(refreshIfAlive, 900);
+        return [...prev, entry];
+      });
+    });
+
     return () => {
-      alive = false;
-      window.clearInterval(timer);
-      document.body.classList.remove("debug-log-body");
+      unlisten.then((fn) => fn());
     };
   }, []);
 
@@ -1319,7 +1386,7 @@ function DebugLogWindow() {
     if (autoScroll && logRef.current) {
       logRef.current.scrollTop = logRef.current.scrollHeight;
     }
-  }, [autoScroll, snapshot?.content, error]);
+  }, [autoScroll, entries]);
 
   async function onClearLog() {
     const confirmed = window.confirm("清空当前调试日志？旧归档文件不会删除。");
@@ -1328,8 +1395,8 @@ function DebugLogWindow() {
     }
     setBusy("clear");
     try {
-      const next = await clearDebugLog();
-      setSnapshot(next);
+      await clearDebugLog();
+      setEntries([]);
       setError(null);
     } catch (error) {
       setError(toMessage(error));
@@ -1351,70 +1418,51 @@ function DebugLogWindow() {
 
   const content = error
     ? error
-    : snapshot?.content.trim()
-      ? snapshot.content
-      : "暂无日志";
+    : entries.length === 0
+      ? "暂无日志"
+      : entries.map((e) => {
+          if (e.level === "FILE") return e.message;
+          const ts = e.timestamp ? new Date(e.timestamp).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", second: "2-digit" }) + " " : "";
+          return `${ts}[${e.level}] ${e.message}`;
+        }).join("\n");
 
   return (
-    <main className="debug-log-window">
-      <section className="debug-log-panel">
-        <div className="debug-log-titlebar">
-          <div>
-            <h1>调试控制台</h1>
-            <span>{snapshot?.logPath || "等待日志路径"}</span>
-          </div>
-          <div className="debug-log-actions">
-            <button onClick={refresh} title="刷新日志">
-              <RefreshCcw size={15} />
-              <span>刷新</span>
-            </button>
-            <button
-              className={autoScroll ? "active" : ""}
-              onClick={() => setAutoScroll((value) => !value)}
-              title={autoScroll ? "关闭自动滚动" : "开启自动滚动"}
-            >
-              <CheckCircle2 size={15} />
-              <span>跟随</span>
-            </button>
-            <button onClick={onOpenLogDir} disabled={busy === "dir"} title="打开日志目录">
-              {busy === "dir" ? <Loader2 className="spin" size={15} /> : <FolderOpen size={15} />}
-              <span>目录</span>
-            </button>
-            <button className="danger" onClick={onClearLog} disabled={busy === "clear"} title="清空当前日志">
-              {busy === "clear" ? <Loader2 className="spin" size={15} /> : <Trash2 size={15} />}
-              <span>清空</span>
-            </button>
-          </div>
+    <section className="debug-log-panel">
+      <div className="debug-log-titlebar">
+        <div>
+          <span>实时日志流 · 共 {entries.length} 条</span>
         </div>
-
-        <div className="debug-log-meta">
-          <span>
-            <b>状态</b>
-            {snapshot?.enabled ? "已启用" : "未启用"}
-          </span>
-          <span>
-            <b>会话</b>
-            {snapshot?.sessionId ?? "-"}
-          </span>
-          <span>
-            <b>启动时间</b>
-            {formatDebugTime(snapshot?.startedAt)}
-          </span>
-          <span>
-            <b>行数</b>
-            {snapshot
-              ? snapshot.truncated
-                ? `${snapshot.lineCount}，显示最近 ${snapshot.maxLines}`
-                : `${snapshot.lineCount}`
-              : "-"}
-          </span>
+        <div className="debug-log-actions">
+          <button
+            className={autoScroll ? "active" : ""}
+            onClick={() => setAutoScroll((value) => !value)}
+            title={autoScroll ? "关闭自动滚动" : "开启自动滚动"}
+          >
+            <CheckCircle2 size={15} />
+            <span>跟随</span>
+          </button>
+          <button onClick={onOpenLogDir} disabled={busy === "dir"} title="打开日志目录">
+            {busy === "dir" ? <Loader2 className="spin" size={15} /> : <FolderOpen size={15} />}
+            <span>目录</span>
+          </button>
+          <button className="danger" onClick={onClearLog} disabled={busy === "clear"} title="清空当前日志">
+            {busy === "clear" ? <Loader2 className="spin" size={15} /> : <Trash2 size={15} />}
+            <span>清空</span>
+          </button>
         </div>
+      </div>
 
-        <pre ref={logRef} className={error ? "debug-log-content error" : "debug-log-content"}>
-          {content}
-        </pre>
-      </section>
-    </main>
+      <div className="debug-log-meta">
+        <span><b>状态</b>{enabled ? "已启用" : "未启用"}</span>
+        <span><b>实时事件</b>流式接收中</span>
+        <span><b>条目数</b>{entries.length}</span>
+        <span><b>方式</b>实时事件 + 文件归档</span>
+      </div>
+
+      <pre ref={logRef} className={error ? "debug-log-content error" : "debug-log-content"}>
+        {content}
+      </pre>
+    </section>
   );
 }
 
@@ -1433,8 +1481,10 @@ function SettingsView(props: {
   onToggleRuntimeEnabled: (runtime: RuntimeInfo, enabled: boolean) => void;
   onReinstallRuntime: (runtime: RuntimeInfo) => void;
   onDeleteRuntime: (runtime: RuntimeInfo) => void;
+  onInstallRemoteRuntime?: (runtime: RemoteRuntime) => void;
   remoteRuntimes: RemoteRuntime[];
   runtimeConflicts: RuntimeConflict[];
+  refreshedAt: number;
   onPickInstallRoot: () => void;
   onOpenInstallRoot: () => void;
   onCheckUpdate: () => void;
@@ -1447,7 +1497,7 @@ function SettingsView(props: {
 
   return (
     <section className="settings-layout">
-      <div className="settings-panel">
+      <div className="settings-panel glass-panel">
         <div className="setting-row">
           <label>主题</label>
           <div className="theme-selector">
@@ -1542,18 +1592,18 @@ function SettingsView(props: {
           </select>
         </div>
 
-        <RuntimeSettings
-            runtimes={state?.runtimes ?? []}
-            remoteRuntimes={props.remoteRuntimes}
-            conflicts={props.runtimeConflicts}
-            busy={props.busy}
-            onImport={props.onImportRuntime}
-            onScan={props.onScanRuntimes}
-            onRefreshCatalog={props.onRefreshRuntimeCatalog}
-            onToggle={props.onToggleRuntimeEnabled}
-            onReinstall={props.onReinstallRuntime}
-            onDelete={props.onDeleteRuntime}
-          />
+
+        <div className="setting-row split">
+          <label>调试模式</label>
+          <label className="toggle-label">
+            <input
+              type="checkbox"
+              checked={draft.debugMode}
+              onChange={() => props.updateDraft({ debugMode: !draft.debugMode })}
+            />
+            <span className="toggle-slider" />
+          </label>
+        </div>
 
         <div className="setting-row">
           <label>启动器版本</label>
@@ -1592,17 +1642,60 @@ function SettingsView(props: {
   );
 }
 
+/**
+ * 运行时管理独立页面
+ * 将设置页中的运行时管理模块提取为主内容区视图，
+ * 提供本地运行时启用/禁用、重装、删除及远端运行时查看能力。
+ */
+function RuntimesView(props: {
+  runtimes: RuntimeInfo[];
+  remoteRuntimes: RemoteRuntime[];
+  runtimeConflicts: RuntimeConflict[];
+  busy: string | null;
+  refreshedAt: number;
+  onImportRuntime: () => void;
+  onScanRuntimes: () => void;
+  onRefreshRuntimeCatalog: () => void;
+  onToggleRuntimeEnabled: (runtime: RuntimeInfo, enabled: boolean) => void;
+  onReinstallRuntime: (runtime: RuntimeInfo) => void;
+  onDeleteRuntime: (runtime: RuntimeInfo) => void;
+  onInstallRemoteRuntime?: (runtime: RemoteRuntime) => void;
+}) {
+  return (
+    <section className="runtimes-layout">
+      <div className="runtimes-panel glass-panel">
+        <RuntimeSettings
+          runtimes={props.runtimes}
+          remoteRuntimes={props.remoteRuntimes}
+          conflicts={props.runtimeConflicts}
+          busy={props.busy}
+          refreshedAt={props.refreshedAt}
+          onImport={props.onImportRuntime}
+          onScan={props.onScanRuntimes}
+          onRefreshCatalog={props.onRefreshRuntimeCatalog}
+          onToggle={props.onToggleRuntimeEnabled}
+          onReinstall={props.onReinstallRuntime}
+          onDelete={props.onDeleteRuntime}
+          onInstall={props.onInstallRemoteRuntime}
+        />
+      </div>
+    </section>
+  );
+}
+
 function RuntimeSettings(props: {
   runtimes: RuntimeInfo[];
   remoteRuntimes: RemoteRuntime[];
   conflicts: RuntimeConflict[];
   busy: string | null;
+  refreshedAt: number;
   onImport: () => void;
   onScan: () => void;
   onRefreshCatalog: () => void;
   onToggle: (runtime: RuntimeInfo, enabled: boolean) => void;
   onReinstall: (runtime: RuntimeInfo) => void;
   onDelete: (runtime: RuntimeInfo) => void;
+  onInstall?: (runtime: RemoteRuntime) => void;
 }) {
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
 
@@ -1620,7 +1713,7 @@ function RuntimeSettings(props: {
   return (
     <div className="setting-row">
       <div className="runtime-settings-head">
-        <label>运行时管理</label>
+        <label>运行时</label>
         <div className="runtime-settings-actions">
           <button className="secondary-button" onClick={props.onImport}>
             <FileUp size={16} />
@@ -1634,6 +1727,9 @@ function RuntimeSettings(props: {
             <RefreshCcw size={16} />
             <span>刷新</span>
           </button>
+          {props.refreshedAt > 0 && (
+            <span className="refresh-timestamp">上次刷新 {formatRefreshTime(props.refreshedAt)}</span>
+          )}
         </div>
       </div>
 
@@ -1641,57 +1737,92 @@ function RuntimeSettings(props: {
         <RuntimeConflictNotice conflicts={props.conflicts} />
       )}
 
-      {launcherRuntimes.length === 0 && otherRuntimes.length === 0 ? (
-        <p className="muted">暂无已安装的运行时，使用上方的导入或检索来添加。</p>
-      ) : (
-        <div className="runtime-sections">
-          <RuntimeSourceSection
-            key="launcher"
-            label="启动器下载"
-            icon={<HardDriveDownload size={15} />}
-            count={launcherRuntimes.length}
-            collapsed={collapsed["launcher"] ?? false}
-            onToggle={() => toggleSection("launcher")}
-            emptyLabel="暂无启动器下载的运行时"
-          >
-            {launcherRuntimes.map((rt) => (
-              <RuntimeSettingsCard
-                key={rt.id}
-                runtime={rt}
-                showReinstall={findRemoteForLocalRuntime(rt, props.remoteRuntimes) !== undefined}
-                showDelete
-                conflicted={isRuntimeInConflicts(rt, props.conflicts)}
-                busy={props.busy}
-                onToggle={(enabled) => props.onToggle(rt, enabled)}
-                onReinstall={() => props.onReinstall(rt)}
-                onDelete={() => props.onDelete(rt)}
-              />
-            ))}
-          </RuntimeSourceSection>
+      <div className="runtime-sections">
+        {(launcherRuntimes.length > 0 || otherRuntimes.length > 0) ? (
+          <>
+            <RuntimeSourceSection
+              key="launcher"
+              label="启动器下载"
+              icon={<HardDriveDownload size={15} />}
+              count={launcherRuntimes.length}
+              collapsed={collapsed["launcher"] ?? false}
+              onToggle={() => toggleSection("launcher")}
+              emptyLabel="暂无启动器下载的运行时"
+            >
+              {launcherRuntimes.map((rt) => (
+                <RuntimeSettingsCard
+                  key={rt.id}
+                  runtime={rt}
+                  showReinstall={findRemoteForLocalRuntime(rt, props.remoteRuntimes) !== undefined}
+                  showDelete
+                  conflicted={isRuntimeInConflicts(rt, props.conflicts)}
+                  busy={props.busy}
+                  onToggle={(enabled) => props.onToggle(rt, enabled)}
+                  onReinstall={() => props.onReinstall(rt)}
+                  onDelete={() => props.onDelete(rt)}
+                />
+              ))}
+            </RuntimeSourceSection>
 
-          <RuntimeSourceSection
-            key="other"
-            label="导入 / 检索 / 系统"
-            icon={<CheckCircle2 size={15} />}
-            count={otherRuntimes.length}
-            collapsed={collapsed["other"] ?? false}
-            onToggle={() => toggleSection("other")}
-            emptyLabel="暂无其他来源的运行时"
-          >
-            {otherRuntimes.map((rt) => (
-              <RuntimeSettingsCard
-                key={rt.id}
-                runtime={rt}
-                showReinstall={false}
-                showDelete={false}
-                conflicted={isRuntimeInConflicts(rt, props.conflicts)}
-                busy={props.busy}
-                onToggle={(enabled) => props.onToggle(rt, enabled)}
-              />
-            ))}
-          </RuntimeSourceSection>
-        </div>
-      )}
+            <RuntimeSourceSection
+              key="other"
+              label="导入 / 检索 / 系统"
+              icon={<CheckCircle2 size={15} />}
+              count={otherRuntimes.length}
+              collapsed={collapsed["other"] ?? false}
+              onToggle={() => toggleSection("other")}
+              emptyLabel="暂无其他来源的运行时"
+            >
+              {otherRuntimes.map((rt) => (
+                <RuntimeSettingsCard
+                  key={rt.id}
+                  runtime={rt}
+                  showReinstall={false}
+                  showDelete={false}
+                  conflicted={isRuntimeInConflicts(rt, props.conflicts)}
+                  busy={props.busy}
+                  onToggle={(enabled) => props.onToggle(rt, enabled)}
+                />
+              ))}
+            </RuntimeSourceSection>
+          </>
+        ) : (
+          <p className="muted" style={{ marginTop: 0 }}>暂无已安装的运行时，使用上方的导入或检索来添加。</p>
+        )}
+
+        <RuntimeSourceSection
+          key="remote"
+          label="远端运行时 (Adoptium JRE)"
+          icon={<Cloud size={15} />}
+          count={props.remoteRuntimes.length}
+          collapsed={collapsed["remote"] ?? false}
+          onToggle={() => toggleSection("remote")}
+          emptyLabel={props.remoteRuntimes.length === 0 ? "点击刷新按钮加载远端列表" : ""}
+        >
+          {props.remoteRuntimes.map((rt) => (
+            <RuntimeCard
+              key={rt.id}
+              runtime={rt}
+              kind="remote"
+              compact
+              action={props.onInstall ? (
+                <button
+                  className="mini-button icon-mini"
+                  title="下载运行时"
+                  onClick={() => props.onInstall!(rt)}
+                  disabled={props.busy === `runtime:${rt.id}`}
+                >
+                  {props.busy === `runtime:${rt.id}` ? (
+                    <Loader2 className="spin" size={13} />
+                  ) : (
+                    <HardDriveDownload size={13} />
+                  )}
+                </button>
+              ) : undefined}
+            />
+          ))}
+        </RuntimeSourceSection>
+      </div>
     </div>
   );
 }
@@ -2044,7 +2175,7 @@ function InstanceSettingsModal(props: {
     <div className="modal-layer" role="dialog" aria-modal="true">
       <div className="instance-settings-modal">
         <button className="modal-close" title="关闭" onClick={props.onClose}>
-          <X size={17} />
+          <X size={17} strokeWidth={1.25} />
         </button>
         <div>
           <h2>{props.instance.version}</h2>
@@ -2057,7 +2188,14 @@ function InstanceSettingsModal(props: {
               value={props.draft.runtimeId}
               onChange={(event) => props.onRuntimeChange(event.target.value)}
             >
-              <option value="">自动选择</option>
+              <option value="">
+                {(() => {
+                  const r = findAutoSelectedRuntime(enabledRuntimes, props.instance.requiredJavaVersion ?? 17);
+                  return r
+                    ? `自动选择 (${formatRuntimeName(r)} · ${runtimeSourceLabel(r)})`
+                    : "自动选择"
+                })()}
+              </option>
               {enabledRuntimes.map((runtime) => (
                 <option key={runtime.id} value={runtime.id}>
                   {formatRuntimeName(runtime)}
@@ -2143,7 +2281,7 @@ function RuntimeGuide(props: {
           <img src={alphaSprite} alt="" />
         </div>
         <h2>准备 Java 运行时</h2>
-        <p>当前没有可用运行时，启动游戏前需要下载 JRE 或在设置页导入本地 Java。</p>
+        <p>当前没有可用运行时，启动游戏前需要下载 JRE 或在运行时管理页导入本地 Java。</p>
         <div className="guide-runtime-select">
           <select
             value={props.selectedRuntime?.id ?? ""}
@@ -2172,7 +2310,7 @@ function RuntimeGuide(props: {
           </button>
           <button className="secondary-button" onClick={props.onGoImport}>
             <FileUp size={17} />
-            <span>去设置导入</span>
+            <span>去运行时导入</span>
           </button>
           <button className="ghost-button guide-dismiss" onClick={props.onDismiss}>
             无需理会
@@ -2216,7 +2354,7 @@ function DeleteConfirmModal(props: {
     <div className="modal-layer" role="dialog" aria-modal="true">
       <div className="delete-confirm-modal">
         <button className="modal-close" title="关闭" onClick={props.onCancel} disabled={props.busy}>
-          <X size={17} />
+          <X size={17} strokeWidth={1.25} />
         </button>
         <div className="delete-confirm-head">
           <span>
@@ -2314,11 +2452,13 @@ function TaskItem({
   onPause,
   onResume,
   onCancel,
+  onDismiss,
 }: {
   task: TaskRecord;
   onPause: (taskId: string) => void;
   onResume: (taskId: string) => void;
   onCancel: (taskId: string) => void;
+  onDismiss?: (taskId: string) => void;
 }) {
   const totalBytes = task.totalBytes ?? 0;
   const hasTotal = totalBytes > 0;
@@ -2352,20 +2492,27 @@ function TaskItem({
         <span>{progressLabel}</span>
       </div>
       <div className="task-progress-row">
-        {isActive && (
+        {(isActive || task.status === "failed") && (
           <div className="task-controls">
             {task.status === "paused" ? (
               <button title="继续下载" onClick={() => onResume(task.id)}>
                 <Play size={13} />
               </button>
-            ) : (
+            ) : task.status === "running" ? (
               <button title="暂停下载" onClick={() => onPause(task.id)}>
                 <Pause size={13} />
               </button>
+            ) : null}
+            {task.status === "running" || task.status === "paused" ? (
+              <button className="danger" title="取消下载" onClick={() => onCancel(task.id)}>
+                <X size={13} strokeWidth={1.25} />
+              </button>
+            ) : null}
+            {task.status !== "running" && task.status !== "paused" && onDismiss && (
+              <button className="danger" title="关闭" onClick={() => onDismiss(task.id)}>
+                <X size={13} strokeWidth={1.25} />
+              </button>
             )}
-            <button className="danger" title="取消下载" onClick={() => onCancel(task.id)}>
-              <X size={13} />
-            </button>
           </div>
         )}
         <div className="progress-track">
@@ -2560,6 +2707,12 @@ function formatRuntimeName(runtime: Pick<RuntimeInfo, "javaVersion" | "os" | "ar
   return `JRE ${runtime.javaVersion}`;
 }
 
+function findAutoSelectedRuntime(runtimes: RuntimeInfo[], minJavaVersion: number) {
+  return runtimes
+    .filter((r) => r.enabled && r.javaVersion >= minJavaVersion)
+    .sort((a, b) => a.javaVersion - b.javaVersion)[0]
+}
+
 function runtimeSourceLabel(runtime: Pick<RuntimeInfo, "source">) {
   if (runtime.source === "launcher") {
     return "启动器";
@@ -2610,9 +2763,7 @@ function formatTaskBytes(task: TaskRecord) {
 
 function formatTaskDetail(task: TaskRecord) {
   const parts = [task.message ?? "下载中", formatTaskBytes(task)];
-  if (task.bytesPerSecond && task.bytesPerSecond > 0) {
-    parts.push(`速度 ${formatSpeed(task.bytesPerSecond)}`);
-  }
+  parts.push(`速度 ${task.bytesPerSecond && task.bytesPerSecond > 0 ? formatSpeed(task.bytesPerSecond) : "-"}`);
   if (!task.totalBytes && task.downloadedBytes > 0) {
     parts.push("总大小未返回");
   }
@@ -2621,6 +2772,17 @@ function formatTaskDetail(task: TaskRecord) {
 
 function formatSpeed(bytesPerSecond: number) {
   return `${formatBytes(bytesPerSecond)}/s`;
+}
+
+function formatRefreshTime(value: number) {
+  const d = new Date(value)
+  const now = new Date()
+  const time = d.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })
+  if (d.toDateString() === now.toDateString()) return `今天 ${time}`
+  const yesterday = new Date(now)
+  yesterday.setDate(yesterday.getDate() - 1)
+  if (d.toDateString() === yesterday.toDateString()) return `昨天 ${time}`
+  return `${d.getMonth() + 1}/${d.getDate()} ${time}`
 }
 
 function formatDate(value?: string | null) {

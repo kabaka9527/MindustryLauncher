@@ -1,5 +1,6 @@
 use crate::{
     config::{self, InstallLayout},
+    debug_console,
     error::{AppError, AppResult},
     fs_util,
     instances::safe_path_part,
@@ -10,6 +11,10 @@ use chrono::Utc;
 use regex::Regex;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
+
+fn hex_encode(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{:02x}", b)).collect()
+}
 use std::{
     collections::HashSet,
     env, fs,
@@ -65,6 +70,17 @@ pub async fn list_remote_runtimes(
     settings: &Settings,
     layout: &InstallLayout,
 ) -> AppResult<Vec<RemoteRuntime>> {
+    let runtimes = fetch_remote_runtimes(settings, layout).await?;
+    if let Err(err) = save_cached_remote_runtimes(layout, &runtimes) {
+        debug_console::warn(format!("远端运行时列表缓存失败：{err}"));
+    }
+    Ok(runtimes)
+}
+
+async fn fetch_remote_runtimes(
+    settings: &Settings,
+    layout: &InstallLayout,
+) -> AppResult<Vec<RemoteRuntime>> {
     let network = NetworkClient::new(settings, layout.cache_dir.join("http"))?;
     let root = network
         .get_text_cached(&format!("{TUNA_ADOPTIUM_ROOT}/"))
@@ -93,6 +109,14 @@ pub async fn list_remote_runtimes(
 
     runtimes.sort_by(|a, b| b.java_version.cmp(&a.java_version));
     Ok(runtimes)
+}
+
+pub fn load_cached_remote_runtimes(layout: &InstallLayout) -> AppResult<Vec<RemoteRuntime>> {
+    Ok(fs_util::read_json(&layout.remote_runtimes_cache_path())?.unwrap_or_default())
+}
+
+fn save_cached_remote_runtimes(layout: &InstallLayout, runtimes: &Vec<RemoteRuntime>) -> AppResult<()> {
+    fs_util::write_json(&layout.remote_runtimes_cache_path(), runtimes)
 }
 
 pub async fn install_runtime(
@@ -364,7 +388,7 @@ fn runtime_id_for_source(source: RuntimeSource, java_version: u16, runtime_root:
     };
     let mut hasher = Sha256::new();
     hasher.update(runtime_root.to_string_lossy().as_bytes());
-    let digest = hex::encode(hasher.finalize());
+    let digest = hex_encode(&hasher.finalize());
     format!("{prefix}-{java_version}-{}", &digest[..10])
 }
 
@@ -642,11 +666,6 @@ fn detect_java_details(java_path: &Path) -> AppResult<JavaRuntimeDetails> {
         .ok_or_else(|| AppError::Invalid(format!("cannot parse Java version from {text}")))
 }
 
-#[cfg(test)]
-fn parse_java_version_output(text: &str) -> Option<u16> {
-    parse_java_runtime_details(text).map(|details| details.java_version)
-}
-
 fn parse_java_runtime_details(text: &str) -> Option<JavaRuntimeDetails> {
     let regex = Regex::new(r#"(?:openjdk|java) version "([^"]+)""#).ok()?;
     let version = regex.captures(text)?.get(1)?.as_str();
@@ -913,7 +932,7 @@ pub fn adoptium_arch() -> &'static str {
 mod tests {
     use super::{
         build_tuna_jre_url, java_feature_from_class_major, package_from_adoptium_value,
-        parse_java_version_output, parse_tuna_java_versions, parse_tuna_runtime_packages,
+        parse_java_runtime_details, parse_tuna_java_versions, parse_tuna_runtime_packages,
     };
     use serde_json::json;
 
@@ -984,11 +1003,13 @@ mod tests {
     #[test]
     fn parses_java_version_output() {
         assert_eq!(
-            parse_java_version_output(r#"openjdk version "17.0.11" 2024-04-16"#),
+            parse_java_runtime_details(r#"openjdk version "17.0.11" 2024-04-16"#)
+                .map(|d| d.java_version),
             Some(17)
         );
         assert_eq!(
-            parse_java_version_output(r#"java version "1.8.0_402""#),
+            parse_java_runtime_details(r#"java version "1.8.0_402""#)
+                .map(|d| d.java_version),
             Some(8)
         );
     }

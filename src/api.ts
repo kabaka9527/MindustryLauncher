@@ -3,6 +3,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
   AcceleratorList,
   AppUiState,
+  DebugLogEntry,
   DebugLogSnapshot,
   InstalledInstance,
   LaunchSettings,
@@ -56,6 +57,16 @@ export function ensureRuntime(javaVersion: number | null, onEvent: Channel<TaskE
 
 export function listRemoteRuntimes() {
   return invoke<RemoteRuntime[]>("list_remote_runtimes");
+}
+
+export function startupRefreshRuntimes() {
+  return invoke<RemoteRuntime[]>("startup_refresh_runtimes");
+}
+
+export function onRuntimesRefreshed(callback: (runtimes: RemoteRuntime[]) => void): Promise<UnlistenFn> {
+  return listen<RemoteRuntime[]>("runtimes-refreshed", (event) => {
+    callback(event.payload);
+  });
 }
 
 export function installRuntime(runtime: RemoteRuntime, onEvent: Channel<TaskEvent>) {
@@ -134,8 +145,14 @@ export function openDebugLogDir() {
   return invoke<void>("open_debug_log_dir");
 }
 
-export function openDebugLogWindow() {
-  return invoke<void>("open_debug_log_window");
+export function emitFrontendLog(level: string, message: string) {
+  return invoke<void>("emit_frontend_log", { level, message });
+}
+
+export function onDebugLogEntry(callback: (entry: DebugLogEntry) => void): Promise<UnlistenFn> {
+  return listen<DebugLogEntry>("debug-log-entry", (event) => {
+    callback(event.payload);
+  });
 }
 
 export function checkLauncherUpdate() {

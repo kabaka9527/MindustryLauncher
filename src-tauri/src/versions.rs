@@ -29,7 +29,6 @@ struct GithubAsset {
     name: String,
     size: u64,
     browser_download_url: String,
-    digest: Option<String>,
 }
 
 pub async fn refresh_versions(
@@ -124,19 +123,12 @@ pub fn load_cached_versions(layout: &InstallLayout) -> AppResult<Vec<RemoteVersi
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum VersionRefreshScope {
-    #[allow(dead_code)]
-    Visible,
     All,
 }
 
 impl VersionRefreshScope {
-    fn includes(self, settings: &Settings, channel: GameChannel) -> bool {
-        match self {
-            Self::Visible => settings
-                .channel_visibility
-                .is_visible(channel, settings.show_be),
-            Self::All => true,
-        }
+    fn includes(self, _settings: &Settings, _channel: GameChannel) -> bool {
+        true
     }
 }
 
@@ -494,7 +486,7 @@ fn map_release(
             name: asset.name,
             size: asset.size,
             download_url: asset.browser_download_url,
-            digest: asset.digest,
+            digest: None,
         })
         .collect();
     let selected_asset = select_desktop_jar(&assets)?;
@@ -580,16 +572,6 @@ mod tests {
             .into_iter()
             .map(|spec| spec.channel)
             .collect()
-    }
-
-    #[test]
-    fn visible_refresh_scope_uses_current_channel_visibility() {
-        let settings = Settings::with_install_root("D:/MindustryLauncher/app-data".to_string());
-
-        assert_eq!(
-            channels_for(&settings, VersionRefreshScope::Visible),
-            vec![GameChannel::Mindustry]
-        );
     }
 
     #[test]
