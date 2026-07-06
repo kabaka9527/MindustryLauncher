@@ -80,6 +80,11 @@ export type InstalledInstance = {
   installedAt: string;
   requiredJavaVersion?: number | null;
   launchSettings: LaunchSettings;
+  totalPlaySeconds: number;
+  lastLaunchedAt?: string | null;
+  lastSessionSeconds?: number | null;
+  runningPid?: number | null;
+  runningSince?: string | null;
 };
 
 export type LaunchSettings = {

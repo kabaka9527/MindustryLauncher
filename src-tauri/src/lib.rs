@@ -267,12 +267,13 @@ async fn save_instance_launch_settings(
 
 #[tauri::command(rename_all = "camelCase")]
 async fn launch_version(
+    app: AppHandle,
     state: State<'_, LauncherState>,
     instance_id: String,
 ) -> AppResult<LaunchResult> {
     let settings = state.settings.read().await.clone();
     let layout = config::layout_from_settings(&settings)?;
-    launcher::launch_version(&layout, instance_id).await
+    launcher::launch_version(&app, &layout, instance_id).await
 }
 
 #[tauri::command(rename_all = "camelCase")]
@@ -388,6 +389,9 @@ pub fn run() {
             let layout = config::layout_from_settings(&settings)?;
             layout.ensure()?;
             instances::cleanup_partial_downloads(&layout)?;
+            if let Err(err) = launcher::reconcile_running_instances(&layout) {
+                debug_console::warn(format!("启动核对游戏运行态失败：{err}"));
+            }
             debug_console::set_app_handle(app_handle.clone());
             debug_console::set_log_path(layout.logs_dir.join("debug.log"));
             if settings.debug_mode {

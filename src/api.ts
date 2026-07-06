@@ -155,6 +155,22 @@ export function onDebugLogEntry(callback: (entry: DebugLogEntry) => void): Promi
   });
 }
 
+export function onGameSessionEnded(
+  callback: (instance: InstalledInstance) => void,
+): Promise<UnlistenFn> {
+  return listen<InstalledInstance>("game-session-ended", (event) => {
+    callback(event.payload);
+  });
+}
+
+export function onGameSessionStarted(
+  callback: (instance: InstalledInstance) => void,
+): Promise<UnlistenFn> {
+  return listen<InstalledInstance>("game-session-started", (event) => {
+    callback(event.payload);
+  });
+}
+
 export function checkLauncherUpdate() {
   return invoke<LauncherUpdateInfo>("check_launcher_update");
 }

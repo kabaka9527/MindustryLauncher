@@ -73,6 +73,11 @@ pub async fn install_version(
             installed_at: Utc::now().to_rfc3339(),
             required_java_version: Some(required_java),
             launch_settings: LaunchSettings::default(),
+            total_play_seconds: 0,
+            last_launched_at: None,
+            last_session_seconds: None,
+            running_pid: None,
+            running_since: None,
         };
 
         let mut instances = config::load_instances(layout)?;

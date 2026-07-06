@@ -54,6 +54,8 @@ import {
   startupRefreshRuntimes,
   onVersionsRefreshed,
   onRuntimesRefreshed,
+  onGameSessionStarted,
+  onGameSessionEnded,
   resumeDownload,
   scanRuntimes,
   saveInstanceLaunchSettings,
@@ -140,6 +142,11 @@ const channelVisibilityKeys: Array<{
   { key: "mindustryXbe", channel: "mindustryXBE", label: "MindustryX BE" },
 ];
 
+// 版本列表刷新的超时阈值（毫秒）。超过该时间后端仍未回传“versions-refreshed”
+// 事件时，前端强制结束加载状态，避免网络超时或接口无响应导致“正在后台刷新”
+// 提示一直不消失。
+const VERSION_REFRESH_TIMEOUT_MS = 30_000;
+
 function logFrontend(level: string, message: string) {
   try {
     emitFrontendLog(level, message)
@@ -160,9 +167,23 @@ export default function App() {
   const [selectedRuntimeId, setSelectedRuntimeId] = useState("");
   const [versionsRefreshedAt, setVersionsRefreshedAt] = useState(0);
   const [runtimesRefreshedAt, setRuntimesRefreshedAt] = useState(0);
+  // 版本列表加载状态：true 表示正在后台刷新，用于驱动刷新按钮的加载动画与提示。
+  const [versionsRefreshing, setVersionsRefreshing] = useState(false);
+  // 请求令牌：每次刷新自增，只有“最新一次”请求的收尾逻辑可以更新界面，
+  // 从而解决并发刷新时的状态覆盖冲突（旧请求晚到不会覆盖新请求的结果）。
+  const versionsRefreshTokenRef = useRef(0);
+  // 是否在加载中（供一次性事件监听闭包读取最新值）。
+  const versionsRefreshingRef = useRef(false);
+  // 超时计时器，用于超时后强制收尾。
+  const versionsRefreshTimerRef = useRef<number | null>(null);
   const [runtimeGuideOpen, setRuntimeGuideOpen] = useState(false);
   const [editingInstanceId, setEditingInstanceId] = useState<string | null>(null);
   const [deleteConfirmation, setDeleteConfirmation] = useState<DeleteConfirmation | null>(null);
+  // 防重复启动：同版本游戏已在运行时弹出的明确警告。
+  const [launchConflict, setLaunchConflict] = useState<{
+    version: string;
+    message: string;
+  } | null>(null);
   const [toastMessage, setToastMessage] = useState<ToastMessage | null>(null);
   const toastTimerRef = useRef<number | null>(null);
   const [instanceSettingsDraft, setInstanceSettingsDraft] = useState<{
@@ -200,6 +221,9 @@ export default function App() {
     return () => {
       if (toastTimerRef.current !== null) {
         window.clearTimeout(toastTimerRef.current);
+      }
+      if (versionsRefreshTimerRef.current !== null) {
+        window.clearTimeout(versionsRefreshTimerRef.current);
       }
     };
   }, []);
@@ -299,15 +323,78 @@ export default function App() {
       .catch((error) => setNotice(toMessage(error)));
   }, [startupVersionsRefreshDone, state]);
 
+  // 收尾一次版本刷新：仅当 token 与“最新请求”一致时才更新界面，避免
+  // 过期/并发请求覆盖当前状态。无论成功或失败都会把加载状态重置为 false。
+  function cancelVersionsRefreshTimer() {
+    if (versionsRefreshTimerRef.current !== null) {
+      window.clearTimeout(versionsRefreshTimerRef.current);
+      versionsRefreshTimerRef.current = null;
+    }
+  }
+
+  function finishVersionsRefresh(token: number, success: boolean, message?: string) {
+    if (token !== versionsRefreshTokenRef.current) {
+      return;
+    }
+    cancelVersionsRefreshTimer();
+    versionsRefreshingRef.current = false;
+    setVersionsRefreshing(false);
+    if (message) {
+      setNotice(message);
+    }
+    logFrontend(success ? "info" : "warn", `版本列表刷新结束（${success ? "成功" : "失败"}）`);
+  }
+
   // Listen for fresh version data pushed from the backend.
   useEffect(() => {
     const unlisten = onVersionsRefreshed((versions) => {
       setState((current) => (current ? { ...current, versions } : current));
       setVersionsRefreshedAt(Date.now());
       logFrontend("info", `远端版本数据到达：${versions.length} 个版本`);
+      // 若本次事件来自一次用户触发的刷新，则正式收尾并复位加载状态。
+      if (versionsRefreshingRef.current) {
+        finishVersionsRefresh(
+          versionsRefreshTokenRef.current,
+          true,
+          `版本列表已刷新（${versions.length} 个版本）`,
+        );
+      }
     });
     return () => {
       unlisten.then((fn) => fn());
+    };
+  }, []);
+
+  // 游戏会话实时同步：后端在进程启动/退出时推送最新实例状态，
+  // 前端就地更新，无需重启启动器即可看到运行时长与运行态变化。
+  useEffect(() => {
+    const startUnlisten = onGameSessionStarted((instance) => {
+      setState((current) =>
+        current
+          ? {
+              ...current,
+              instances: current.instances.map((item) =>
+                item.id === instance.id ? instance : item,
+              ),
+            }
+          : current,
+      );
+    });
+    const endUnlisten = onGameSessionEnded((instance) => {
+      setState((current) =>
+        current
+          ? {
+              ...current,
+              instances: current.instances.map((item) =>
+                item.id === instance.id ? instance : item,
+              ),
+            }
+          : current,
+      );
+    });
+    return () => {
+      startUnlisten.then((fn) => fn());
+      endUnlisten.then((fn) => fn());
     };
   }, []);
 
@@ -326,6 +413,27 @@ export default function App() {
       ),
     [state?.instances],
   );
+
+  // 总游戏时长：汇总所有已安装实例的累计游玩时长（秒）。
+  const totalPlaySeconds = useMemo(
+    () =>
+      (state?.instances ?? []).reduce(
+        (sum, instance) => sum + (instance.totalPlaySeconds ?? 0),
+        0,
+      ),
+    [state?.instances],
+  );
+
+  // 最近游玩时间：取所有实例中“最近一次启动”的最大值。
+  const lastPlayedAt = useMemo(() => {
+    const times = (state?.instances ?? [])
+      .map((instance) => instance.lastLaunchedAt)
+      .filter((value): value is string => Boolean(value));
+    if (times.length === 0) {
+      return null;
+    }
+    return times.reduce((a, b) => (new Date(a) >= new Date(b) ? a : b));
+  }, [state?.instances]);
 
   const visibleVersions = useMemo(() => {
     const settings = draft ?? state?.settings;
@@ -523,16 +631,39 @@ export default function App() {
 
   async function onRefreshVersions() {
     logFrontend("info", "用户触发了版本列表刷新");
+    // 递增请求令牌：本次刷新标记为“最新请求”，过期请求的收尾将被忽略。
+    const token = (versionsRefreshTokenRef.current += 1);
+    versionsRefreshingRef.current = true;
+    setVersionsRefreshing(true);
     setNotice("版本列表正在后台刷新");
-    const cached = await startupRefreshVersions();
-    logFrontend("info", `版本列表刷新响应：缓存 ${cached.length} 个版本`);
-    setState((current) => (current ? { ...current, versions: cached } : current));
-    refreshAccelerators()
-      .then((accelerators) => {
-        logFrontend("info", `加速源刷新响应：${accelerators.sources.length} 个加速源`);
-        setState((current) => (current ? { ...current, accelerators } : current));
-      })
-      .catch(() => {});
+    // 启动超时保护：后端在超时阈值内仍未回传数据则强制结束加载状态，
+    // 防止网络超时或接口无响应导致提示卡死。
+    cancelVersionsRefreshTimer();
+    versionsRefreshTimerRef.current = window.setTimeout(() => {
+      logFrontend("warn", "版本列表刷新超时，强制结束加载状态");
+      finishVersionsRefresh(token, false, "版本列表刷新超时，请检查网络后重试");
+    }, VERSION_REFRESH_TIMEOUT_MS);
+
+    try {
+      // startup_refresh_versions 立即返回缓存数据，真正的刷新结果通过
+      // "versions-refreshed" 事件异步送达（由上面的监听器收尾）。
+      const cached = await startupRefreshVersions();
+      logFrontend("info", `版本列表刷新响应：缓存 ${cached.length} 个版本`);
+      setState((current) => (current ? { ...current, versions: cached } : current));
+      refreshAccelerators()
+        .then((accelerators) => {
+          logFrontend("info", `加速源刷新响应：${accelerators.sources.length} 个加速源`);
+          setState((current) => (current ? { ...current, accelerators } : current));
+        })
+        .catch((error) =>
+          logFrontend("error", `加速源刷新失败：${toMessage(error)}`),
+        );
+    } catch (error) {
+      // 缓存读取或命令调用本身失败：立即收尾并复位加载状态，不依赖事件。
+      const message = toMessage(error);
+      logFrontend("error", `版本列表刷新失败：${message}`);
+      finishVersionsRefresh(token, false, message);
+    }
   }
 
   async function onRefreshAccelerators() {
@@ -758,8 +889,35 @@ export default function App() {
 
   async function onLaunch(instance: InstalledInstance) {
     await runWithBusy(`launch:${instance.id}`, async () => {
-      const result = await launchVersion(instance.id);
-      setNotice(`已启动 PID ${result.pid}`);
+      try {
+        const result = await launchVersion(instance.id);
+        // 立即在前端标记运行态，配合后端 game-session-started/ended 实时同步时长。
+        setState((current) =>
+          current
+            ? {
+                ...current,
+                instances: current.instances.map((item) =>
+                  item.id === instance.id
+                    ? {
+                        ...item,
+                        runningPid: result.pid || item.runningPid,
+                        runningSince: item.runningSince ?? new Date().toISOString(),
+                      }
+                    : item,
+                ),
+              }
+            : current,
+        );
+        setNotice(`已启动 PID ${result.pid}`);
+      } catch (error) {
+        const message = toMessage(error);
+        // 后端基于 PID 存活校验判定“已在运行”时，弹出明确警告而非普通提示。
+        if (message.includes("已在运行中") || message.includes("重复启动")) {
+          setLaunchConflict({ version: instance.version, message });
+        } else {
+          throw error;
+        }
+      }
     });
   }
 
@@ -1033,6 +1191,7 @@ export default function App() {
                 <IconButton
                   title="刷新版本列表"
                   label="刷新"
+                  busy={versionsRefreshing}
                   onClick={onRefreshVersions}
                 >
                   <RefreshCcw size={17} />
@@ -1044,6 +1203,20 @@ export default function App() {
 
         {view === "games" ? (
           <section className="content-grid">
+            <div className="playtime-summary">
+              <div className="playtime-stat">
+                <span>总游戏时长</span>
+                <strong>{formatPlaytime(totalPlaySeconds)}</strong>
+              </div>
+              <div className="playtime-stat">
+                <span>已安装版本</span>
+                <strong>{installedInstances.length}</strong>
+              </div>
+              <div className="playtime-stat">
+                <span>最近游玩</span>
+                <strong>{lastPlayedAt ? formatDate(lastPlayedAt) : "暂无记录"}</strong>
+              </div>
+            </div>
             <div className="version-list">
               {installedInstances.length === 0 ? (
                 <div className="empty-state game-empty">
@@ -1070,18 +1243,27 @@ export default function App() {
                     <article className="version-row game-row" key={instance.id}>
                       <div className="version-main">
                         <ChannelBadge channel={instance.channel} />
-                        <div>
-                          <h2>{instance.version}</h2>
-                          <div className="version-meta">
-                            <span>安装于 {formatDate(instance.installedAt)}</span>
-                            <span>
-                              {runtime
-                                ? `${formatRuntimeName(runtime)} · ${runtimeSourceLabel(runtime)}`
-                                : "自动选择运行时"}
-                            </span>
-                            <span>版本隔离</span>
+                          <div>
+                            <h2>{instance.version}</h2>
+                            <div className="version-meta">
+                              <span>安装于 {formatDate(instance.installedAt)}</span>
+                              <span>
+                                {runtime
+                                  ? `${formatRuntimeName(runtime)} · ${runtimeSourceLabel(runtime)}`
+                                  : "自动选择运行时"}
+                              </span>
+                              <span>版本隔离</span>
+                              {instance.runningPid ? (
+                                <span className="running-tag">运行中</span>
+                              ) : (
+                                <span>
+                                  {instance.totalPlaySeconds > 0
+                                    ? `游玩 ${formatPlaytime(instance.totalPlaySeconds)}`
+                                    : "未游玩过"}
+                                </span>
+                              )}
+                            </div>
                           </div>
-                        </div>
                       </div>
                       <div className="version-actions">
                         <IconButton
@@ -1125,7 +1307,9 @@ export default function App() {
                 <div className="empty-state">
                   <RefreshCcw size={28} />
                   <span>暂无版本数据</span>
-                  <button onClick={onRefreshVersions}>刷新版本</button>
+                  <button onClick={onRefreshVersions} disabled={versionsRefreshing}>
+                    刷新版本
+                  </button>
                 </div>
               ) : (
                 visibleVersions.map((version) => {
@@ -1278,6 +1462,12 @@ export default function App() {
             }
             onCancel={onCancelDelete}
             onConfirm={onConfirmDelete}
+          />
+        )}
+        {launchConflict && (
+          <LaunchConflictModal
+            conflict={launchConflict}
+            onClose={() => setLaunchConflict(null)}
           />
         )}
       </main>
@@ -2385,6 +2575,35 @@ function DeleteConfirmModal(props: {
   );
 }
 
+function LaunchConflictModal(props: {
+  conflict: { version: string; message: string };
+  onClose: () => void;
+}) {
+  return (
+    <div className="modal-layer" role="dialog" aria-modal="true">
+      <div className="delete-confirm-modal">
+        <div className="delete-confirm-head">
+          <span>
+            <AlertTriangle size={20} />
+          </span>
+          <div>
+            <h2>无法重复启动 {props.conflict.version}</h2>
+            <p>{props.conflict.message}</p>
+          </div>
+        </div>
+        <p className="delete-confirm-warning">
+          该版本对应的游戏进程仍在运行，重复启动可能导致存档冲突或资源争用。请先关闭已运行的实例，或在任务管理器中结束对应进程。
+        </p>
+        <div className="modal-actions">
+          <button className="save-button" onClick={props.onClose}>
+            知道了
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function UpdatePromptModal(props: {
   info: LauncherUpdateInfo;
   onClose: () => void;
@@ -2794,6 +3013,26 @@ function formatDate(value?: string | null) {
     month: "2-digit",
     day: "2-digit",
   }).format(new Date(value));
+}
+
+function formatPlaytime(totalSeconds?: number | null) {
+  const seconds = Math.max(0, Math.floor(totalSeconds ?? 0));
+  if (seconds < 60) {
+    return `${seconds} 秒`;
+  }
+  const minutes = Math.floor(seconds / 60);
+  const remSeconds = seconds % 60;
+  if (minutes < 60) {
+    return remSeconds > 0 ? `${minutes} 分 ${remSeconds} 秒` : `${minutes} 分钟`;
+  }
+  const hours = Math.floor(minutes / 60);
+  const remMinutes = minutes % 60;
+  if (hours < 24) {
+    return remMinutes > 0 ? `${hours} 小时 ${remMinutes} 分` : `${hours} 小时`;
+  }
+  const days = Math.floor(hours / 24);
+  const remHours = hours % 24;
+  return remHours > 0 ? `${days} 天 ${remHours} 小时` : `${days} 天`;
 }
 
 function formatDebugTime(value?: string | null) {

@@ -235,6 +235,21 @@ pub struct InstalledInstance {
     pub required_java_version: Option<u16>,
     #[serde(default)]
     pub launch_settings: LaunchSettings,
+    /// 累计游玩时长（秒），每次游戏进程退出时累加。
+    #[serde(default)]
+    pub total_play_seconds: u64,
+    /// 最近一次启动游戏的时间（ISO 8601），进程退出后保留用于展示。
+    #[serde(default)]
+    pub last_launched_at: Option<String>,
+    /// 最近一次会话的游玩时长（秒），便于界面展示“上次游玩”。
+    #[serde(default)]
+    pub last_session_seconds: Option<u64>,
+    /// 正在运行的游戏进程 PID；进程退出或异常终止后清空。
+    #[serde(default)]
+    pub running_pid: Option<u32>,
+    /// 本次运行会话的开始时间（ISO 8601），用于按 PID 结算时长。
+    #[serde(default)]
+    pub running_since: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

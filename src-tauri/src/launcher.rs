@@ -1,11 +1,13 @@
 use crate::{
     config::{self, InstallLayout},
+    debug_console,
     error::{AppError, AppResult},
     fs_util,
-    models::{LaunchResult, MigrationResult, Settings},
+    models::{InstalledInstance, LaunchResult, MigrationResult, Settings},
     runtime,
 };
 use chrono::Utc;
+use tauri::{AppHandle, Emitter};
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
 use std::{
@@ -13,12 +15,12 @@ use std::{
     path::{Path, PathBuf},
     process::Stdio,
 };
-use tauri::AppHandle;
 use tokio::process::Command;
 
 // Launching avoids the shell completely. The instance data directory is passed
 // both as a JVM property and as an environment variable for Mindustry isolation.
 pub async fn launch_version(
+    app: &AppHandle,
     layout: &InstallLayout,
     instance_id: String,
 ) -> AppResult<LaunchResult> {
@@ -28,6 +30,26 @@ pub async fn launch_version(
         .find(|item| item.id == instance_id)
         .cloned()
         .ok_or_else(|| AppError::NotFound(format!("instance {instance_id}")))?;
+
+    // 防重复启动：若记录中存在运行中的 PID，校验该进程是否真实存活。
+    if let Some(pid) = instance.running_pid {
+        if is_process_alive(pid) {
+            return Err(AppError::Conflict(format!(
+                "版本 {} 的游戏已在运行中（PID {}），请先关闭当前实例再启动。",
+                instance.version, pid
+            )));
+        }
+        // 进程已退出但状态未释放（如启动器曾被强制关闭），在此清理陈旧运行态。
+        let mut instances = config::load_instances(layout)?;
+        if let Some(record) = instances
+            .iter_mut()
+            .find(|item| item.id == instance_id)
+        {
+            record.running_pid = None;
+            record.running_since = None;
+        }
+        config::save_instances(layout, &instances)?;
+    }
 
     let jar_path = PathBuf::from(&instance.jar_path);
     let data_dir = PathBuf::from(&instance.data_dir);
@@ -93,6 +115,21 @@ pub async fn launch_version(
         command.arg(arg);
     }
 
+    let launched_at = Utc::now();
+    let instance_id_for_record = instance.id.clone();
+    // 记录本次启动时间与运行中的 PID，用于展示与防重复启动校验。
+    {
+        let mut instances = config::load_instances(layout)?;
+        if let Some(record) = instances
+            .iter_mut()
+            .find(|item| item.id == instance_id_for_record)
+        {
+            record.last_launched_at = Some(launched_at.to_rfc3339());
+            record.running_since = Some(launched_at.to_rfc3339());
+        }
+        config::save_instances(layout, &instances)?;
+    }
+
     let mut child = command
         .env("MINDUSTRY_DATA_DIR", &data_dir)
         .current_dir(PathBuf::from(&instance.install_dir))
@@ -103,8 +140,60 @@ pub async fn launch_version(
         .map_err(|err| AppError::Command(err.to_string()))?;
 
     let pid = child.id().unwrap_or_default();
+    // 进程启动时回填 PID，供前端实时展示运行状态。
+    {
+        let mut instances = config::load_instances(layout)?;
+        if let Some(record) = instances
+            .iter_mut()
+            .find(|item| item.id == instance_id_for_record)
+        {
+            record.running_pid = Some(pid);
+        }
+        config::save_instances(layout, &instances)?;
+        if let Some(record) = instances
+            .iter()
+            .find(|item| item.id == instance_id_for_record)
+        {
+            let _ = app.emit("game-session-started", record.clone());
+        }
+    }
+
+    let record_layout = layout.clone();
+    let app_clone = app.clone();
+    // 游戏进程退出后，累加本次会话时长到该实例的累计游玩时长，并推送更新。
     tokio::spawn(async move {
-        let _ = child.wait().await;
+        let elapsed = match child.wait().await {
+            Ok(_) => (Utc::now() - launched_at).num_seconds().max(0) as u64,
+            Err(err) => {
+                debug_console::warn(format!("等待游戏进程退出失败：{err}"));
+                0
+            }
+        };
+
+        // 无论时长是否为零都要清理运行态，确保进程异常退出时正确释放状态。
+        let mut final_record: Option<InstalledInstance> = None;
+        if let Ok(mut instances) = config::load_instances(&record_layout) {
+            if let Some(record) = instances
+                .iter_mut()
+                .find(|item| item.id == instance_id_for_record)
+            {
+                if elapsed > 0 {
+                    record.total_play_seconds += elapsed;
+                    record.last_session_seconds = Some(elapsed);
+                }
+                record.running_pid = None;
+                record.running_since = None;
+                final_record = Some(record.clone());
+            }
+            let _ = config::save_instances(&record_layout, &instances);
+        }
+        if let Some(record) = final_record {
+            // 推送最终状态，前端无需重启即可看到更新的时长与运行态。
+            let _ = app_clone.emit("game-session-ended", record);
+            debug_console::info(format!(
+                "游戏会话结束：{instance_id_for_record}，本次 {elapsed} 秒"
+            ));
+        }
     });
 
     Ok(LaunchResult {
@@ -258,6 +347,62 @@ pub fn open_url(url: &str) -> AppResult<()> {
     command
         .spawn()
         .map_err(|err| AppError::Command(format!("failed to open url {url}: {err}")))?;
+    Ok(())
+}
+
+// 基于 PID 的进程存活检测：用于防重复启动校验与运行态核对。
+// Windows 通过 OpenProcess + GetExitCodeProcess 查询退出码（STILL_ACTIVE=259）；
+// 类 Unix 通过 kill -0 探测进程是否存在。
+#[cfg(windows)]
+fn is_process_alive(pid: u32) -> bool {
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::Threading::{
+        GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+    };
+    const STILL_ACTIVE: u32 = 259;
+    unsafe {
+        let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if handle.is_null() {
+            // 无法打开句柄：进程不存在或权限不足，按“未运行”处理。
+            return false;
+        }
+        let mut exit_code: u32 = 0;
+        let ok = GetExitCodeProcess(handle, &mut exit_code) != 0;
+        CloseHandle(handle);
+        ok && exit_code == STILL_ACTIVE
+    }
+}
+
+#[cfg(not(windows))]
+fn is_process_alive(pid: u32) -> bool {
+    use std::process::Command;
+    // POSIX：kill -0 不发送信号，仅检查进程存在与权限。
+    Command::new("kill")
+        .arg("-0")
+        .arg(pid.to_string())
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false)
+}
+
+/// 启动器启动时调用：核对所有实例的 running_pid 是否真实存活，
+/// 清理因启动器被强制关闭而残留的“运行中”状态，确保异常退出后能正确释放。
+pub fn reconcile_running_instances(layout: &InstallLayout) -> AppResult<()> {
+    let mut instances = config::load_instances(layout)?;
+    let mut changed = false;
+    for record in instances.iter_mut() {
+        if let Some(pid) = record.running_pid {
+            if !is_process_alive(pid) {
+                record.running_pid = None;
+                record.running_since = None;
+                changed = true;
+            }
+        }
+    }
+    if changed {
+        config::save_instances(layout, &instances)?;
+        debug_console::info("已清理残留的游戏运行态");
+    }
     Ok(())
 }
 
