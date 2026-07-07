@@ -65,6 +65,7 @@ import {
 } from "./api";
 import type {
   AppUiState,
+  ChannelSprite,
   ChannelVisibility,
   DebugLogEntry,
   DebugLogSnapshot,
@@ -85,6 +86,7 @@ import coreSprite from "./assets/mindustry/core-shard.png";
 import lancerSprite from "./assets/mindustry/lancer.png";
 import zenithSprite from "./assets/mindustry/zenith.png";
 import { useTheme } from "./hooks/useTheme";
+import { useWikiIcons } from "./hooks/useWikiIcons";
 import TitleBar from "./TitleBar";
 
 type View = "games" | "versions" | "runtimes" | "settings" | "debug";
@@ -124,13 +126,6 @@ const channelLabels: Record<GameChannel, string> = {
   mindustryXBE: "MindustryX BE",
 };
 
-const channelSprites: Record<GameChannel, string> = {
-  mindustry: coreSprite,
-  mindustryX: zenithSprite,
-  mindustryBE: lancerSprite,
-  mindustryXBE: alphaSprite,
-};
-
 const channelVisibilityKeys: Array<{
   key: keyof ChannelVisibility;
   channel: GameChannel;
@@ -155,6 +150,7 @@ function logFrontend(level: string, message: string) {
 
 export default function App() {
   const { theme, setTheme, isDark } = useTheme();
+  const { floatItems, channelSprites } = useWikiIcons();
 
   const [view, setView] = useState<View>("games");
   const [state, setState] = useState<AppUiState | null>(null);
@@ -1080,18 +1076,17 @@ export default function App() {
   return (
     <div className="app-shell">
       <TitleBar />
-      <div className="animated-backdrop" aria-hidden="true">
-        <div className="sector-plate sector-plate-a" />
-        <div className="sector-plate sector-plate-b" />
-        <div className="sector-plate sector-plate-c" />
-        <img className="backdrop-sprite core-base core-base-a" src={coreSprite} alt="" />
-        <img className="backdrop-sprite core-base core-base-b" src={coreSprite} alt="" />
-        <img className="backdrop-sprite turret-emplacement turret-emplacement-a" src={lancerSprite} alt="" />
-        <img className="backdrop-sprite turret-emplacement turret-emplacement-b" src={lancerSprite} alt="" />
-        <img className="backdrop-sprite unit-drift unit-alpha-a" src={alphaSprite} alt="" />
-        <img className="backdrop-sprite unit-drift unit-alpha-b" src={alphaSprite} alt="" />
-        <img className="backdrop-sprite unit-drift unit-zenith-a" src={zenithSprite} alt="" />
-        <img className="backdrop-sprite unit-drift unit-zenith-b" src={zenithSprite} alt="" />
+      <div className="app-backdrop" aria-hidden="true" />
+      <div className="wiki-float-layer" aria-hidden="true">
+        {floatItems.map((item) => (
+          <img
+            key={item.key}
+            className="wiki-float-item"
+            src={item.url}
+            alt=""
+            style={item.style}
+          />
+        ))}
       </div>
       <aside className="sidebar">
         <div className="brand">
@@ -1242,7 +1237,7 @@ export default function App() {
                   return (
                     <article className="version-row game-row" key={instance.id}>
                       <div className="version-main">
-                        <ChannelBadge channel={instance.channel} />
+                        <ChannelBadge channel={instance.channel} sprites={channelSprites} />
                           <div>
                             <h2>{instance.version}</h2>
                             <div className="version-meta">
@@ -1302,6 +1297,7 @@ export default function App() {
                 settings={draft ?? state?.settings ?? null}
                 busy={busy === "channelFilter"}
                 onToggle={onToggleVersionChannel}
+                sprites={channelSprites}
               />
               {visibleVersions.length === 0 ? (
                 <div className="empty-state">
@@ -1317,7 +1313,7 @@ export default function App() {
                   return (
                     <article className="version-row" key={version.id}>
                       <div className="version-main">
-                        <ChannelBadge channel={version.channel} />
+                        <ChannelBadge channel={version.channel} sprites={channelSprites} />
                         <div>
                           <h2>{version.name || version.tag}</h2>
                           <div className="version-meta">
@@ -2124,10 +2120,20 @@ function RuntimeSettingsCard(props: {
   );
 }
 
-function ChannelBadge(props: { channel: GameChannel }) {
+function ChannelBadge(props: {
+  channel: GameChannel;
+  sprites: Record<GameChannel, ChannelSprite>;
+}) {
+  const sprite = props.sprites[props.channel];
   return (
     <span className={`channel-badge ${props.channel}`}>
-      <img src={channelSprites[props.channel]} alt="" />
+      <img
+        src={sprite.url}
+        alt=""
+        onError={(e) => {
+          e.currentTarget.src = sprite.fallback;
+        }}
+      />
       <span>{channelLabels[props.channel]}</span>
     </span>
   );
@@ -2137,6 +2143,7 @@ function ChannelStrip(props: {
   settings: Settings | null;
   busy: boolean;
   onToggle: (key: keyof ChannelVisibility, value: boolean) => void;
+  sprites: Record<GameChannel, ChannelSprite>;
 }) {
   if (!props.settings) {
     return null;
@@ -2154,6 +2161,7 @@ function ChannelStrip(props: {
             checked &&
             ((item.channel !== "mindustryBE" && item.channel !== "mindustryXBE") ||
               props.settings?.showBe);
+          const sprite = props.sprites[item.channel];
           return (
             <button
               key={item.key}
@@ -2162,7 +2170,13 @@ function ChannelStrip(props: {
               onClick={() => props.onToggle(item.key, !checked)}
             >
               <span className={`channel-dot ${item.channel}`}>
-                <img src={channelSprites[item.channel]} alt="" />
+                <img
+                  src={sprite.url}
+                  alt=""
+                  onError={(e) => {
+                    e.currentTarget.src = sprite.fallback;
+                  }}
+                />
               </span>
               <span>{item.label}</span>
             </button>

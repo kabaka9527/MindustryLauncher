@@ -98,8 +98,35 @@ export default function TitleBar() {
     }
   }
 
+  /**
+   * 标题栏按下鼠标时启动窗口拖拽。
+   *
+   * 不使用 data-tauri-drag-region / -webkit-app-region: drag，
+   * 因为该 CSS 属性会让操作系统接管拖拽区域的光标，导致自定义鼠标样式
+   * 在标题栏消失且移出后不恢复。改用 start_dragging() API 在 mousedown
+   * 时手动启动拖拽，标题栏不再是 drag region，CSS 光标可正常生效。
+   *
+   * 仅响应主键（左键）且不响应控件容器内的按下，避免影响按钮交互。
+   * @param e 鼠标事件
+   */
+  async function handleTitlebarMouseDown(e: React.MouseEvent<HTMLElement>) {
+    if (e.button !== 0) {
+      return
+    }
+    const target = e.target as HTMLElement
+    // 控件容器内的按下不触发拖拽（保留按钮点击）
+    if (target.closest(".titlebar-controls")) {
+      return
+    }
+    try {
+      await currentWindow.startDragging()
+    } catch {
+      // 忽略非 Tauri 环境
+    }
+  }
+
   return (
-    <header className="titlebar" data-tauri-drag-region>
+    <header className="titlebar" onMouseDown={handleTitlebarMouseDown}>
       <div className="titlebar-brand">
         <span className="titlebar-brand-text">Mindustry Launcher</span>
       </div>

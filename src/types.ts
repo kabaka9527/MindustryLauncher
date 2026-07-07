@@ -228,3 +228,20 @@ export type LauncherUpdateInfo = {
   releaseBody: string;
   errorMessage?: string | null;
 };
+
+/** Wiki 图标清单分组类型。 */
+export type WikiIconType = "unit" | "block" | "liquid" | "status";
+
+/** Wiki 图标清单结构。 */
+export type WikiIconManifest = {
+  units: string[];
+  blocks: string[];
+  liquids: string[];
+  statuses: string[];
+};
+
+/** 版本通道图标：远程 URL + 本地回退。 */
+export type ChannelSprite = {
+  url: string;
+  fallback: string;
+};

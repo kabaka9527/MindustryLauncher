@@ -2,12 +2,30 @@
    CSS Custom Properties – Light theme (default)
    =================================================================== */
 :root {
-  /* Core surfaces */
-  --color-bg: #edf1f4;
+  /* 全局光标：由 useWikiIcons 在启动期写入远程 Wiki 单位图标 URL，默认系统光标 */
+  --app-cursor-url: auto;
+  /* Unified background layers — 三级面层 + 遮罩，去掉玻璃质感以减少视觉嵌套 */
+  --color-bg: #e9eef2;
   --color-surface: #ffffff;
-  --color-surface-raised: rgba(245, 249, 250, 0.72);
-  --color-surface-glass: rgba(240, 246, 248, 0.62);
-  --color-surface-input: #fbfcfd;
+  --bg-base: #e9eef2;          /* 页面底色 */
+  --bg-raised: #ffffff;        /* 卡片 / 面板 / 行 */
+  --bg-sunken: #f1f5f7;        /* 输入框 / 日志内容等凹陷面 */
+  --bg-chip: #e3eaee;          /* 小标签 / 指标 */
+  --bg-overlay: rgba(18, 27, 33, 0.42); /* 模态遮罩 */
+  --color-surface-raised: var(--bg-raised);
+  --color-surface-glass: var(--bg-raised);
+  --color-surface-input: var(--bg-sunken);
+  --color-surface-card: var(--bg-raised);
+  --color-surface-chip: var(--bg-chip);
+  --color-surface-chip-dark: rgba(255, 255, 255, 0.06);
+
+  /* Unified elevation tokens (clean, restrained) */
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --shadow-card: 0 1px 2px rgba(18, 32, 40, 0.04), 0 6px 16px rgba(18, 32, 40, 0.05);
+  --shadow-float: 0 4px 14px rgba(18, 32, 40, 0.08), 0 12px 32px rgba(18, 32, 40, 0.08);
+  --shadow-focus: 0 0 0 3px var(--color-focus-ring);
 
   /* Text */
   --color-text-primary: #22303c;
@@ -19,7 +37,7 @@
   /* Borders & dividers */
   --color-border: #d8e1e6;
   --color-border-light: #cbd7dd;
-  --color-border-glass: rgba(188, 202, 208, 0.72);
+  --color-border-glass: var(--color-border);
 
   /* Accent / interactive */
   --color-accent: #256d85;
@@ -67,7 +85,7 @@
   --color-dot-mindustryXBE: #c786cc;
 
   /* Channel strip */
-  --color-channel-strip-bg: rgba(255, 255, 255, 0.72);
+  --color-channel-strip-bg: #ffffff;
   --color-channel-toggle-bg: #f8faf9;
   --color-channel-toggle-border: #ced8de;
   --color-channel-toggle-text: #445763;
@@ -123,7 +141,6 @@
   --color-empty-visual-color: #2b6f86;
 
   /* Modal */
-  --color-modal-overlay: rgba(18, 27, 33, 0.42);
   --color-modal-bg: #ffffff;
   --color-modal-border: rgba(218, 226, 229, 0.96);
   --color-modal-close-bg: #eef3f4;
@@ -133,7 +150,7 @@
   --color-hint-warn: #8a6116;
 
   /* Topbar */
-  --color-topbar-bg: rgba(255, 255, 255, 0.74);
+  --color-topbar-bg: #eef3f6;
   --color-topbar-border: #d8e0e5;
 
   /* Scrollbar (hidden by default) */
@@ -147,11 +164,23 @@
    Dark theme
    =================================================================== */
 [data-theme="dark"] {
-  --color-bg: #12171c;
+  --color-bg: #11161b;
   --color-surface: #1a2127;
-  --color-surface-raised: rgba(26, 33, 39, 0.92);
-  --color-surface-glass: rgba(22, 29, 35, 0.9);
-  --color-surface-input: #232b33;
+  --bg-base: #11161b;
+  --bg-raised: #1a2127;
+  --bg-sunken: #141b21;
+  --bg-chip: #232c34;
+  --bg-overlay: rgba(0, 0, 0, 0.55);
+  --color-surface-raised: var(--bg-raised);
+  --color-surface-glass: var(--bg-raised);
+  --color-surface-input: var(--bg-sunken);
+  --color-surface-card: var(--bg-raised);
+  --color-surface-chip: var(--bg-chip);
+  --color-surface-chip-dark: rgba(255, 255, 255, 0.06);
+
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.22), 0 6px 16px rgba(0, 0, 0, 0.28);
+  --shadow-float: 0 4px 14px rgba(0, 0, 0, 0.32), 0 12px 32px rgba(0, 0, 0, 0.36);
+  --shadow-focus: 0 0 0 3px var(--color-focus-ring);
 
   --color-text-primary: #e2e8ee;
   --color-text-heading: #edf2f7;
@@ -161,7 +190,7 @@
 
   --color-border: #2b3640;
   --color-border-light: #374350;
-  --color-border-glass: rgba(55, 67, 80, 0.72);
+  --color-border-glass: var(--color-border);
 
   --color-accent: #3d8fa8;
   --color-accent-hover: #4aa3be;
@@ -201,7 +230,7 @@
   --color-dot-mindustryBE: #c49a42;
   --color-dot-mindustryXBE: #b86ec4;
 
-  --color-channel-strip-bg: rgba(26, 33, 39, 0.8);
+  --color-channel-strip-bg: #1a222a;
   --color-channel-toggle-bg: #1a222a;
   --color-channel-toggle-border: #374350;
   --color-channel-toggle-text: #94a7b5;
@@ -249,7 +278,6 @@
   --color-empty-visual-bg: #1e2b33;
   --color-empty-visual-color: #5a9ab8;
 
-  --color-modal-overlay: rgba(0, 0, 0, 0.55);
   --color-modal-bg: #1a2127;
   --color-modal-border: rgba(55, 67, 80, 0.92);
   --color-modal-close-bg: #24313b;
@@ -257,7 +285,7 @@
 
   --color-hint-warn: #d4b85c;
 
-  --color-topbar-bg: rgba(26, 33, 39, 0.82);
+  --color-topbar-bg: #13191f;
   --color-topbar-border: #2b3640;
 }
 
@@ -278,6 +306,9 @@
 *::before,
 *::after {
   box-sizing: border-box;
+  /* 全局应用 Wiki 自定义光标，确保标题栏、按钮、输入框、底部留白等
+     所有区域都显示统一的鼠标样式；自定义光标加载失败时回退到 auto。 */
+  cursor: var(--app-cursor-url), auto;
   transition: background-color 0.3s, color 0.3s, border-color 0.3s, box-shadow 0.3s;
 }
 
@@ -301,11 +332,12 @@ select {
 
 button {
   border: 0;
-  cursor: pointer;
+  /* 按钮也使用 Wiki 自定义光标，pointer 作为后备以保留语义 */
+  cursor: var(--app-cursor-url), pointer;
 }
 
 button:disabled {
-  cursor: not-allowed;
+  cursor: var(--app-cursor-url), not-allowed;
   opacity: 0.65;
 }
 
@@ -316,258 +348,67 @@ button:disabled {
   position: relative;
   isolation: isolate;
   display: grid;
-  grid-template-columns: 160px minmax(0, 1fr);
+  grid-template-columns: 168px minmax(0, 1fr);
   grid-template-rows: auto 1fr;
   width: 100vw;
   height: 100vh;
   overflow: hidden;
   color: var(--color-text-primary);
-  background:
-    radial-gradient(ellipse 55% 45% at 8% 18%, rgba(247, 185, 79, 0.22), transparent),
-    radial-gradient(ellipse 45% 35% at 88% 8%, rgba(54, 121, 181, 0.20), transparent),
-    radial-gradient(ellipse 35% 50% at 45% 88%, rgba(74, 157, 142, 0.16), transparent),
-    radial-gradient(ellipse 30% 30% at 72% 55%, rgba(160, 100, 200, 0.10), transparent),
-    radial-gradient(ellipse 25% 25% at 30% 40%, rgba(200, 140, 60, 0.08), transparent),
-    linear-gradient(160deg, #e4edef 0%, #dfe8f0 30%, #eef0e6 55%, #e2eaed 80%, #e8e4ea 100%);
+  background: var(--bg-base);
+  cursor: var(--app-cursor-url);
 }
 
-[data-theme="dark"] .app-shell {
-  background:
-    radial-gradient(ellipse 55% 45% at 8% 18%, rgba(120, 90, 40, 0.18), transparent),
-    radial-gradient(ellipse 45% 35% at 88% 8%, rgba(40, 80, 120, 0.16), transparent),
-    radial-gradient(ellipse 35% 50% at 45% 88%, rgba(40, 100, 80, 0.12), transparent),
-    radial-gradient(ellipse 30% 30% at 72% 55%, rgba(80, 50, 120, 0.10), transparent),
-    linear-gradient(160deg, #12181e 0%, #141c23 35%, #1a1613 65%, #131a21 100%);
-}
-
-/* ===================================================================
-   Animated backdrop
-   =================================================================== */
-.animated-backdrop {
+/* 极简背景：单一栅格底纹替代原先的 sector-plate + 精灵动画多层叠加 */
+.app-backdrop {
   position: absolute;
   inset: 0;
   z-index: -1;
-  overflow: hidden;
   pointer-events: none;
-}
-
-.animated-backdrop::before {
-  content: "";
-  position: absolute;
-  inset: -60px;
-  opacity: 0.28;
   background-image:
-    linear-gradient(rgba(41, 68, 82, 0.14) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(41, 68, 82, 0.14) 1px, transparent 1px);
-  background-size: 42px 42px;
-  transform: rotate(-4deg);
+    linear-gradient(rgba(41, 68, 82, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(41, 68, 82, 0.05) 1px, transparent 1px);
+  background-size: 48px 48px;
 }
 
-.animated-backdrop::after {
-  content: "";
+[data-theme="dark"] .app-backdrop {
+  background-image:
+    linear-gradient(rgba(80, 120, 160, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(80, 120, 160, 0.04) 1px, transparent 1px);
+}
+
+/* 浮动 Wiki 图标层：位于 .app-backdrop 之上、主内容之下，不拦截指针事件 */
+.wiki-float-layer {
   position: absolute;
   inset: 0;
-  opacity: 0.07;
-  background:
-    radial-gradient(ellipse 30% 30% at 20% 30%, rgba(247, 185, 79, 0.6), transparent),
-    radial-gradient(ellipse 25% 25% at 75% 20%, rgba(54, 121, 181, 0.6), transparent),
-    radial-gradient(ellipse 20% 20% at 60% 70%, rgba(74, 157, 142, 0.5), transparent);
+  z-index: -1;
+  pointer-events: none;
+  overflow: hidden;
 }
 
-[data-theme="dark"] .animated-backdrop::before {
-  opacity: 0.06;
-  background-image:
-    linear-gradient(rgba(80, 120, 160, 0.08) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(80, 120, 160, 0.08) 1px, transparent 1px);
-}
-
-[data-theme="dark"] .animated-backdrop::after {
-  opacity: 0.03;
-  background:
-    radial-gradient(ellipse 30% 30% at 20% 30%, rgba(247, 185, 79, 0.3), transparent),
-    radial-gradient(ellipse 25% 25% at 75% 20%, rgba(54, 121, 181, 0.3), transparent),
-    radial-gradient(ellipse 20% 20% at 60% 70%, rgba(74, 157, 142, 0.3), transparent);
-}
-
-.sector-plate {
-  position: absolute;
-  border: 1px solid rgba(67, 91, 104, 0.12);
-  background:
-    linear-gradient(135deg, rgba(255, 255, 255, 0.18), transparent 58%),
-    repeating-linear-gradient(0deg, rgba(36, 60, 70, 0.07) 0 1px, transparent 1px 18px),
-    repeating-linear-gradient(90deg, rgba(36, 60, 70, 0.06) 0 1px, transparent 1px 18px);
-  clip-path: polygon(8% 0, 100% 14%, 88% 100%, 0 84%);
-}
-
-[data-theme="dark"] .sector-plate {
-  border-color: rgba(114, 148, 166, 0.08);
-  background:
-    linear-gradient(135deg, rgba(118, 153, 172, 0.07), transparent 58%),
-    repeating-linear-gradient(0deg, rgba(111, 154, 174, 0.045) 0 1px, transparent 1px 18px),
-    repeating-linear-gradient(90deg, rgba(111, 154, 174, 0.04) 0 1px, transparent 1px 18px);
-}
-
-.sector-plate-a {
-  width: 360px;
-  height: 230px;
-  right: 11%;
-  top: 16%;
-  opacity: 0.22;
-  transform: rotate(8deg);
-}
-
-.sector-plate-b {
-  width: 430px;
-  height: 280px;
-  left: 28%;
-  bottom: 9%;
-  opacity: 0.18;
-  transform: rotate(12deg);
-}
-
-.sector-plate-c {
-  width: 260px;
-  height: 180px;
-  left: 13%;
-  top: 38%;
-  opacity: 0.14;
-  transform: rotate(-10deg);
-}
-
-.backdrop-sprite {
+.wiki-float-item {
   position: absolute;
   image-rendering: pixelated;
-  object-fit: contain;
-  opacity: 0.22;
-  filter: drop-shadow(0 18px 18px rgba(21, 30, 36, 0.18));
-  transform-origin: 50% 50%;
+  animation: wiki-float-drift linear infinite;
   will-change: transform;
 }
 
-[data-theme="dark"] .backdrop-sprite {
-  opacity: 0.12;
-  filter: drop-shadow(0 18px 18px rgba(0, 0, 0, 0.35));
-}
-
-.core-base {
-  opacity: 0.16;
-}
-
-.turret-emplacement {
-  opacity: 0.20;
-}
-
-.unit-drift {
-  opacity: 0.28;
-}
-
-[data-theme="dark"] .core-base,
-[data-theme="dark"] .turret-emplacement,
-[data-theme="dark"] .unit-drift {
-  opacity: 0.13;
-}
-
-.core-base-a {
-  width: 112px;
-  right: 8%;
-  bottom: 10%;
-  animation: core-idle 12s ease-in-out infinite;
-}
-
-.core-base-b {
-  width: 84px;
-  left: 18%;
-  top: 34%;
-  animation: core-idle 14s ease-in-out infinite reverse;
-}
-
-.turret-emplacement-a {
-  width: 78px;
-  left: 42%;
-  top: 49%;
-  animation: turret-watch 10s ease-in-out infinite;
-}
-
-.turret-emplacement-b {
-  width: 60px;
-  right: 35%;
-  top: 18%;
-  animation: turret-watch 12s ease-in-out infinite reverse;
-}
-
-.unit-alpha-a {
-  width: 66px;
-  left: 19%;
-  bottom: 8%;
-  animation: unit-route-a 16s ease-in-out infinite;
-}
-
-.unit-alpha-b {
-  width: 48px;
-  right: 17%;
-  top: 43%;
-  animation: unit-route-b 18s ease-in-out infinite reverse;
-}
-
-.unit-zenith-a {
-  width: 94px;
-  right: 28%;
-  bottom: 17%;
-  animation: unit-route-b 20s ease-in-out infinite;
-}
-
-.unit-zenith-b {
-  width: 68px;
-  left: 39%;
-  top: 15%;
-  animation: unit-route-a 17s ease-in-out infinite reverse;
-}
-
-@keyframes unit-route-a {
-  0%,
-  100% {
-    transform: translate3d(0, 0, 0) rotate(-16deg);
+@keyframes wiki-float-drift {
+  0% {
+    transform: translate3d(0, 0, 0) rotate(0deg);
   }
   50% {
-    transform: translate3d(26px, -22px, 0) rotate(-4deg);
+    transform: translate3d(40px, -30px, 0) rotate(8deg);
   }
-}
-
-@keyframes unit-route-b {
-  0%,
   100% {
-    transform: translate3d(0, 0, 0) rotate(14deg);
-  }
-  50% {
-    transform: translate3d(-24px, 18px, 0) rotate(2deg);
-  }
-}
-
-@keyframes turret-watch {
-  0%,
-  100% {
-    transform: translate3d(0, 0, 0) rotate(-5deg);
-  }
-  50% {
-    transform: translate3d(8px, -4px, 0) rotate(7deg);
-  }
-}
-
-@keyframes core-idle {
-  0%,
-  100% {
-    transform: translate3d(0, 0, 0) scale(1) rotate(0deg);
-  }
-  50% {
-    transform: translate3d(0, -8px, 0) scale(1.04) rotate(2deg);
+    transform: translate3d(0, 0, 0) rotate(0deg);
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .backdrop-sprite,
   .brand-unit,
   .empty-alpha,
-  .empty-zenith {
+  .empty-zenith,
+  .wiki-float-item {
     animation: none;
   }
 }
@@ -579,16 +420,13 @@ button:disabled {
   grid-row: 2 / 3;
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding: 20px 14px;
+  gap: 8px;
+  padding: 22px 14px;
   color: var(--color-sidebar-text);
-  background: rgba(237, 243, 246, 0.55);
-  backdrop-filter: blur(24px) saturate(1.2);
-}
-
-[data-theme="dark"] .sidebar {
-  background: rgba(18, 24, 30, 0.60);
-  backdrop-filter: blur(24px) saturate(1.2);
+  /* 背景透明：让主界面 .app-backdrop 的栅格底纹直接透出，
+     与启动器主背景无缝融合，消除侧边栏与主区域之间的视觉割裂。 */
+  background: transparent;
+  border-right: 1px solid transparent;
 }
 
 /* Brand */
@@ -663,6 +501,7 @@ button:disabled {
 
 /* Nav buttons */
 .nav-button {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 12px;
@@ -673,12 +512,31 @@ button:disabled {
   color: var(--color-nav-text);
   background: transparent;
   text-align: left;
+  transition: background-color 0.18s ease, color 0.18s ease;
 }
 
-.nav-button:hover,
-.nav-button.active {
+/* hover 态：稍深的背景，足以与默认透明态区分开 */
+.nav-button:hover {
   color: var(--color-nav-active-text);
+  background: var(--color-btn-secondary-hover);
+}
+
+/* active 态：更明显的强调背景 + 左侧 accent 色条，确保选中状态清晰可辨 */
+.nav-button.active {
+  color: var(--color-accent);
   background: var(--color-nav-active-bg);
+  font-weight: 700;
+}
+
+.nav-button.active::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 8px;
+  bottom: 8px;
+  width: 3px;
+  border-radius: 0 2px 2px 0;
+  background: var(--color-accent-teal);
 }
 
 .sidebar-footer {
@@ -709,26 +567,23 @@ button:disabled {
   gap: 20px;
   min-height: 72px;
   padding: 16px 36px 14px;
-  background: rgba(237, 243, 246, 0.35);
-  backdrop-filter: blur(12px);
-}
-
-[data-theme="dark"] .topbar {
-  background: rgba(18, 24, 30, 0.35);
+  background: transparent;
+  border-bottom: 1px solid var(--color-border);
 }
 
 .topbar h1 {
   margin: 0;
-  font-size: 24px;
-  letter-spacing: 0;
+  font-size: 23px;
+  font-weight: 800;
+  letter-spacing: -0.2px;
   color: var(--color-text-heading);
 }
 
 .topbar p {
-  margin: 6px 0 0;
+  margin: 4px 0 0;
   max-width: 680px;
   color: var(--color-text-secondary);
-  font-size: 14px;
+  font-size: 13.5px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -773,8 +628,9 @@ button:disabled {
   padding: 0 0 0 14px;
   color: #9aa3ae;
   background: transparent;
-  -webkit-app-region: drag;
-  app-region: drag;
+  /* 拖拽由 onMouseDown + start_dragging() 处理，不再使用 app-region: drag
+     以避免操作系统接管拖拽区域的光标，导致自定义鼠标样式失效。 */
+  cursor: var(--app-cursor-url), auto;
   z-index: 10;
   user-select: none;
 }
@@ -802,8 +658,6 @@ button:disabled {
   border: 0;
   color: #9aa3ae;
   background: transparent;
-  -webkit-app-region: no-drag;
-  app-region: no-drag;
   transition: background-color 0.15s ease, color 0.15s ease;
 }
 
@@ -813,8 +667,8 @@ button:disabled {
 }
 
 .titlebar-button:hover {
-  color: #e2e6ec;
-  background: rgba(255, 255, 255, 0.08);
+  color: var(--color-text-primary);
+  background: var(--bg-chip);
 }
 
 .titlebar-button.active {
@@ -869,15 +723,11 @@ button:disabled {
   gap: 12px;
   min-height: 0;
   padding: 16px 20px;
-  border: 1px solid var(--color-border-glass);
-  border-radius: 12px;
-  background: rgba(235, 244, 247, 0.52);
-  backdrop-filter: blur(20px) saturate(1.3);
-}
-
-[data-theme="dark"] .playtime-summary {
-  background: rgba(20, 27, 33, 0.58);
-  backdrop-filter: blur(20px) saturate(1.3);
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  /* 背景透明：与主界面栅格底纹无缝融合，不再以独立卡片形式悬浮于背景之上。 */
+  background: transparent;
+  box-shadow: none;
 }
 
 .playtime-stat {
@@ -885,9 +735,10 @@ button:disabled {
   gap: 3px;
   min-width: 0;
   padding: 10px 12px;
-  border: 1px solid var(--color-border-light);
+  border: 1px solid transparent;
   border-radius: 8px;
-  background: var(--color-surface-input);
+  /* 背景透明：让统计卡与游戏时长汇总区及主背景视觉统一，消除色块差异。 */
+  background: transparent;
 }
 
 .playtime-stat span {
@@ -920,25 +771,25 @@ button:disabled {
   gap: 20px;
   min-height: 90px;
   padding: 18px 24px;
-  border: 1px solid var(--color-border-glass);
-  border-radius: 12px;
-  background: rgba(235, 244, 247, 0.52);
-  backdrop-filter: blur(20px) saturate(1.3);
-  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease, background-color 0.3s, color 0.3s;
-}
-
-[data-theme="dark"] .version-row {
-  background: rgba(20, 27, 33, 0.58);
-  backdrop-filter: blur(20px) saturate(1.3);
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  /* 背景透明：版本信息行与主界面栅格底纹无缝融合，
+     不再以悬浮卡片形式存在，消除与主背景的色彩差异。 */
+  background: transparent;
+  box-shadow: none;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.3s, color 0.3s;
 }
 
 .version-row:hover {
-  transform: translateY(-2px);
-  border-color: var(--color-border-light);
+  /* hover 时仅以极淡的强调色背景作为交互反馈，避免破坏与主背景的视觉统一。 */
+  border-color: transparent;
+  background: var(--color-nav-active-bg);
+  box-shadow: none;
 }
 
 [data-theme="dark"] .version-row:hover {
-  border-color: var(--color-border-light);
+  background: var(--color-nav-active-bg);
+  box-shadow: none;
 }
 
 .game-row {
@@ -1076,12 +927,14 @@ button:disabled {
   justify-content: center;
   gap: 8px;
   min-height: 36px;
-  padding: 0 12px;
-  border-radius: 7px;
+  padding: 0 14px;
+  border-radius: var(--radius-sm);
   color: #ffffff;
   background: var(--color-accent);
   font-weight: 700;
   white-space: nowrap;
+  box-shadow: 0 1px 2px rgba(18, 32, 40, 0.10);
+  transition: background-color 0.18s ease, box-shadow 0.18s ease, transform 0.06s ease;
 }
 
 .action-button:hover,
@@ -1090,6 +943,15 @@ button:disabled {
 .empty-state button:hover,
 .inline-input button:hover {
   background: var(--color-accent-hover);
+  box-shadow: 0 3px 10px rgba(37, 109, 133, 0.22);
+}
+
+.action-button:active,
+.wide-action:active,
+.save-button:active,
+.empty-state button:active,
+.inline-input button:active {
+  transform: translateY(1px);
 }
 
 .icon-only {
@@ -1112,34 +974,24 @@ button:disabled {
   background: var(--color-mini-btn-danger);
 }
 
-[data-theme="dark"] .icon-only.danger {
-  color: #e08080;
-  background: #3d2727;
-}
-
 /* ===================================================================
    Panels (side / settings)
    =================================================================== */
 .glass-panel {
   min-width: 0;
-  border: 1px solid var(--color-border-glass);
-  border-radius: 12px;
-  background: rgba(235, 244, 247, 0.52);
-  backdrop-filter: blur(20px) saturate(1.3);
-}
-
-[data-theme="dark"] .glass-panel {
-  background: rgba(20, 27, 33, 0.58);
-  backdrop-filter: blur(20px) saturate(1.3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--bg-raised);
+  box-shadow: var(--shadow-card);
 }
 
 .side-panel {
   display: grid;
   align-content: start;
-  gap: 24px;
+  gap: 20px;
   min-height: 0;
   overflow: auto;
-  padding: 24px;
+  padding: 22px;
 }
 
 .panel-section {
@@ -1241,11 +1093,7 @@ button:disabled {
   height: 24px;
   border-radius: 6px;
   color: var(--color-text-label);
-  background: rgba(255, 255, 255, 0.78);
-}
-
-[data-theme="dark"] .task-controls button {
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--color-surface-chip);
 }
 
 .task-controls button:hover {
@@ -1275,14 +1123,10 @@ button:disabled {
   padding: 6px 7px;
   border-radius: 6px;
   color: var(--color-text-label);
-  background: rgba(255, 255, 255, 0.7);
+  background: var(--color-surface-chip);
   font-size: 11px;
   font-weight: 800;
   overflow-wrap: anywhere;
-}
-
-[data-theme="dark"] .task-metrics span {
-  background: rgba(255, 255, 255, 0.05);
 }
 
 .task-metrics b {
@@ -1366,10 +1210,10 @@ button:disabled {
   min-height: 0;
   height: 100%;
   padding: 18px;
-  border: 1px solid var(--color-border-glass);
-  border-radius: 12px;
-  background: var(--color-surface-glass);
-  backdrop-filter: blur(20px) saturate(1.3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--bg-raised);
+  box-shadow: var(--shadow-card);
 }
 
 .debug-log-titlebar {
@@ -1408,7 +1252,7 @@ button:disabled {
   background: var(--color-btn-secondary);
   font-size: 12px;
   font-weight: 700;
-  cursor: pointer;
+  cursor: var(--app-cursor-url), pointer;
 }
 
 .debug-log-actions button:hover,
@@ -1489,8 +1333,8 @@ button:disabled {
 .settings-panel {
   display: grid;
   align-content: start;
-  gap: 24px;
-  padding: 24px;
+  gap: 20px;
+  padding: 22px;
 }
 
 /* ===================================================================
@@ -1509,8 +1353,8 @@ button:disabled {
 .runtimes-panel {
   display: grid;
   align-content: start;
-  gap: 24px;
-  padding: 24px;
+  gap: 20px;
+  padding: 22px;
 }
 
 .setting-row {
@@ -1564,7 +1408,7 @@ button:disabled {
   background: var(--color-surface-input);
   font-size: 13px;
   font-weight: 700;
-  cursor: pointer;
+  cursor: var(--app-cursor-url), pointer;
   transition: background-color 0.3s, color 0.3s, border-color 0.3s;
 }
 
@@ -1582,7 +1426,7 @@ button:disabled {
 .toggle-label {
   display: inline-flex;
   align-items: center;
-  cursor: pointer;
+  cursor: var(--app-cursor-url), pointer;
 }
 .toggle-label input {
   position: absolute;
@@ -1634,7 +1478,7 @@ select {
 input:focus,
 select:focus {
   border-color: var(--color-accent-teal);
-  box-shadow: 0 0 0 3px var(--color-focus-ring);
+  box-shadow: var(--shadow-focus);
 }
 
 .inline-input {
@@ -1694,7 +1538,7 @@ select:focus {
 }
 .version-info .update-error {
   color: #b45309;
-  cursor: help;
+  cursor: var(--app-cursor-url), help;
 }
 
 /* ===================================================================
@@ -1716,25 +1560,17 @@ select:focus {
   min-height: 320px;
   padding: 42px;
   border: 1px dashed var(--color-empty-border);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   color: var(--color-empty-text);
-  background: rgba(235, 244, 247, 0.50);
-  backdrop-filter: blur(20px) saturate(1.3);
-}
-
-[data-theme="dark"] .empty-state {
-  background: rgba(20, 27, 33, 0.55);
+  background: var(--bg-raised);
 }
 
 .game-empty {
   min-height: 100%;
   gap: 18px;
   border-style: solid;
-  border-color: var(--color-border-glass);
-}
-
-[data-theme="dark"] .game-empty {
-  background: rgba(20, 27, 33, 0.55);
+  border-color: var(--color-empty-border);
+  background: var(--bg-raised);
 }
 
 .empty-visual {
@@ -1864,14 +1700,10 @@ select:focus {
   gap: 12px;
   min-height: 58px;
   padding: 10px 12px;
-  border: 1px solid var(--color-border-glass);
-  border-radius: 8px;
-  background: rgba(235, 244, 247, 0.50);
-  backdrop-filter: blur(18px) saturate(1.2);
-}
-
-[data-theme="dark"] .channel-strip {
-  background: rgba(20, 27, 33, 0.55);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-raised);
+  box-shadow: var(--shadow-card);
 }
 
 .strip-title {
@@ -1902,10 +1734,11 @@ select:focus {
   min-width: 118px;
   padding: 0 12px;
   border: 1px solid var(--color-channel-toggle-border);
-  border-radius: 7px;
+  border-radius: var(--radius-sm);
   color: var(--color-channel-toggle-text);
   background: var(--color-channel-toggle-bg);
   font-weight: 700;
+  transition: background-color 0.18s ease, color 0.18s ease, border-color 0.18s ease;
 }
 
 .channel-toggle.active {
@@ -2005,12 +1838,18 @@ select:focus {
   gap: 8px;
   min-height: 52px;
   padding: 8px 9px;
-  border: 1px solid var(--color-progress-track);
-  border-radius: 7px;
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-sm);
   color: var(--color-runtime-card-text);
   background: var(--color-runtime-local-bg);
   font-size: 12px;
   font-weight: 700;
+  box-shadow: var(--shadow-card);
+  transition: border-color 0.18s ease, box-shadow 0.18s ease;
+}
+
+.runtime-card:hover {
+  border-color: var(--color-accent-teal);
 }
 
 .runtime-card.remote {
@@ -2202,7 +2041,7 @@ select:focus {
   background: transparent;
   font-size: 13px;
   font-weight: 700;
-  cursor: pointer;
+  cursor: var(--app-cursor-url), pointer;
   user-select: none;
 }
 
@@ -2266,11 +2105,7 @@ select:focus {
   padding: 8px 12px;
   border: 1px solid var(--color-progress-track);
   border-radius: 6px;
-  background: var(--color-surface);
-}
-
-[data-theme="dark"] .runtime-card.settings-card {
-  background: var(--color-surface-input);
+  background: var(--color-surface-card);
 }
 
 .runtime-card.settings-card.disabled {
@@ -2286,9 +2121,10 @@ select:focus {
   gap: 8px;
   min-height: 36px;
   padding: 0 12px;
-  border-radius: 7px;
+  border-radius: var(--radius-sm);
   font-weight: 800;
   white-space: nowrap;
+  transition: background-color 0.18s ease, color 0.18s ease;
 }
 
 .secondary-button {
@@ -2328,16 +2164,15 @@ select:focus {
   gap: 10px;
   max-width: min(420px, calc(100vw - 36px));
   padding: 13px 18px;
-  border: 1px solid rgba(255, 255, 255, 0.24);
+  border: 1px solid rgba(255, 255, 255, 0.18);
   border-radius: 999px;
   color: #ffffff;
-  background: rgba(29, 53, 69, 0.95);
+  background: #1d3545;
   box-shadow: 0 18px 44px rgba(10, 23, 31, 0.28);
   font-size: 14px;
   font-weight: 800;
   white-space: nowrap;
   animation: toast-pop 180ms ease-out;
-  backdrop-filter: blur(12px);
 }
 
 .toast-message svg {
@@ -2411,8 +2246,7 @@ select:focus {
   place-items: center;
   z-index: 20;
   padding: 24px;
-  background: var(--color-modal-overlay);
-  backdrop-filter: blur(6px);
+  background: var(--bg-overlay);
 }
 
 .runtime-guide,
@@ -2424,21 +2258,10 @@ select:focus {
   width: min(520px, 100%);
   padding: 26px;
   border: 1px solid var(--color-modal-border);
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   color: var(--color-text-primary);
-  background:
-    linear-gradient(135deg, rgba(255, 255, 255, 0.96), rgba(242, 247, 246, 0.96)),
-    var(--color-modal-bg);
-  box-shadow: 0 24px 70px rgba(14, 28, 35, 0.28);
-}
-
-[data-theme="dark"] .runtime-guide,
-[data-theme="dark"] .instance-settings-modal,
-[data-theme="dark"] .delete-confirm-modal {
-  background:
-    linear-gradient(135deg, rgba(26, 33, 39, 0.98), rgba(22, 29, 35, 0.98)),
-    var(--color-modal-bg);
-  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.45);
+  background: var(--color-modal-bg);
+  box-shadow: var(--shadow-float);
 }
 
 .runtime-guide h2,
@@ -2603,19 +2426,15 @@ select:focus {
   width: min(520px, 100%);
   padding: 28px;
   border: 1px solid var(--color-modal-border);
-  border-radius: 10px;
+  border-radius: var(--radius-lg);
   color: var(--color-text-primary);
-  background:
-    linear-gradient(160deg, rgba(255, 255, 255, 0.97), rgba(242, 247, 246, 0.97)),
-    var(--color-modal-bg);
-  box-shadow: 0 24px 70px rgba(14, 28, 35, 0.28);
+  background: var(--color-modal-bg);
+  box-shadow: var(--shadow-float);
 }
 
 [data-theme="dark"] .update-prompt-modal {
-  background:
-    linear-gradient(160deg, rgba(26, 33, 39, 0.98), rgba(22, 29, 35, 0.98)),
-    var(--color-modal-bg);
-  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.45);
+  background: var(--color-modal-bg);
+  box-shadow: var(--shadow-float);
 }
 
 .update-prompt-head {
