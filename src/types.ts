@@ -19,6 +19,7 @@ export type Settings = {
   runtimePromptDismissed: boolean;
   debugMode: boolean;
   ignoredVersions: string[];
+  acceleratorPingEnabled: boolean;
 };
 
 export type AcceleratorSupports = {
@@ -40,12 +41,20 @@ export type Accelerator = {
   supports: AcceleratorSupports;
   healthCheckUrl?: string | null;
   enabledByDefault: boolean;
+  /** 优先级：数值越小越高，1 为最高。 */
+  priority: number;
 };
 
 export type AcceleratorList = {
   version: number;
   updatedAt: string;
   sources: Accelerator[];
+};
+
+export type PingResult = {
+  sourceId: string;
+  latencyMs: number | null;
+  error: string | null;
 };
 
 export type ReleaseAsset = {

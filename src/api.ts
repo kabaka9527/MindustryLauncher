@@ -1,6 +1,7 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
+  Accelerator,
   AcceleratorList,
   AppUiState,
   DebugLogEntry,
@@ -10,6 +11,7 @@ import type {
   LaunchResult,
   LauncherUpdateInfo,
   MigrationResult,
+  PingResult,
   RemoteRuntime,
   RemoteVersion,
   RuntimeInfo,
@@ -19,6 +21,22 @@ import type {
 
 export function getAppState() {
   return invoke<AppUiState>("get_app_state");
+}
+
+export function pingAccelerator(source: Accelerator) {
+  return invoke<PingResult>("ping_accelerator", { source });
+}
+
+export function listUpgradableVersions(instanceId: string) {
+  return invoke<RemoteVersion[]>("list_upgradable_versions", { instanceId });
+}
+
+export function upgradeInstance(
+  instanceId: string,
+  targetVersion: RemoteVersion,
+  onEvent: Channel<TaskEvent>,
+) {
+  return invoke<InstalledInstance>("upgrade_instance", { instanceId, targetVersion, onEvent });
 }
 
 export function saveSettings(settings: Settings) {

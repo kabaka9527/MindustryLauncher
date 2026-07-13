@@ -25,6 +25,7 @@ import {
   Sun,
   Trash2,
   X,
+  Zap,
 } from "lucide-react";
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -47,6 +48,7 @@ import {
   openInstallRoot,
   openUrl,
   pauseDownload,
+  pingAccelerator,
   readDebugLog,
   refreshAccelerators,
   refreshVersions,
@@ -62,8 +64,10 @@ import {
   saveSettings,
   setRuntimeEnabled,
   switchVersion,
+  upgradeInstance,
 } from "./api";
 import type {
+  Accelerator,
   AppUiState,
   ChannelSprite,
   ChannelVisibility,
@@ -73,6 +77,7 @@ import type {
   InstalledInstance,
   LaunchSettings,
   LauncherUpdateInfo,
+  PingResult,
   RemoteRuntime,
   RemoteVersion,
   RuntimeInfo,
@@ -175,6 +180,16 @@ export default function App() {
   const [runtimeGuideOpen, setRuntimeGuideOpen] = useState(false);
   const [editingInstanceId, setEditingInstanceId] = useState<string | null>(null);
   const [deleteConfirmation, setDeleteConfirmation] = useState<DeleteConfirmation | null>(null);
+  const [pingResults, setPingResults] = useState<Record<string, PingResult>>({});
+  // 正在测速的加速源集合，用于在点按“测试”后展示“正在测试”状态。
+  const [pinging, setPinging] = useState<Record<string, boolean>>({});
+  const [upgradeTargetId, setUpgradeTargetId] = useState<string | null>(null);
+  // 升降级结果反馈：仅用于向用户明确展示“成功/失败”的最终状态与原因。
+  const [upgradeFeedback, setUpgradeFeedback] = useState<{
+    status: "success" | "error";
+    title: string;
+    detail: string;
+  } | null>(null);
   // 防重复启动：同版本游戏已在运行时弹出的明确警告。
   const [launchConflict, setLaunchConflict] = useState<{
     version: string;
@@ -212,6 +227,14 @@ export default function App() {
       .catch((error) => setNotice(toMessage(error)))
       .finally(() => setBusy(null));
   }, [reload]);
+
+  // 成功反馈自动消失；失败反馈保留，等待用户主动关闭以阅读具体原因。
+  useEffect(() => {
+    if (upgradeFeedback?.status === "success") {
+      const timer = window.setTimeout(() => setUpgradeFeedback(null), 5000);
+      return () => window.clearTimeout(timer);
+    }
+  }, [upgradeFeedback]);
 
   useEffect(() => {
     return () => {
@@ -670,6 +693,75 @@ export default function App() {
     }, "GitHub 加速列表已刷新");
   }
 
+  async function onPingAccelerator(source: Accelerator) {
+    setPinging((prev) => ({ ...prev, [source.id]: true }));
+    try {
+      const result = await pingAccelerator(source);
+      setPingResults((prev) => ({ ...prev, [source.id]: result }));
+    } catch (error) {
+      setPingResults((prev) => ({
+        ...prev,
+        [source.id]: { sourceId: source.id, latencyMs: null, error: toMessage(error) },
+      }));
+    } finally {
+      setPinging((prev) => ({ ...prev, [source.id]: false }));
+    }
+  }
+
+  async function onSelectUpgradeTarget(instanceId: string) {
+    const instance = instancesById.get(instanceId);
+    if (!instance) return;
+    if (instance.runningPid) {
+      setNotice("游戏正在运行，请先关闭");
+      return;
+    }
+    setUpgradeTargetId(instanceId);
+    setEditingInstanceId(null);
+    setView("versions");
+    setNotice(`选择 ${instance.version} 的升降级目标版本`);
+  }
+
+  async function onUpgradeToVersion(targetVersion: RemoteVersion) {
+    if (!upgradeTargetId) return;
+    const targetId = upgradeTargetId;
+    // 升降级必须基于一个已存在的实例；若标识失效则直接拒绝，绝不回退到新建/安装流程。
+    if (!instancesById.get(targetId)) {
+      setUpgradeTargetId(null);
+      setNotice("待升降级的游戏实例不存在，请刷新后重试");
+      return;
+    }
+    const source = instancesById.get(targetId)!;
+    const direction = compareVersionDirection(source.version, targetVersion.version);
+    const channel = new Channel<TaskEvent>();
+    channel.onmessage = handleTaskEvent;
+    // 用 upgradeTo:{id} 占用 busy，使按钮据此禁用并显示进度，避免并发重复触发。
+    setUpgradeFeedback(null);
+    setBusy(`upgradeTo:${targetVersion.id}`);
+    try {
+      await upgradeInstance(targetId, targetVersion, channel);
+      setUpgradeTargetId(null);
+      await reload();
+      const label = targetVersion.name || targetVersion.tag;
+      const dirText =
+        direction === "upgrade" ? "升级" : direction === "downgrade" ? "降级" : "切换";
+      const message = `${dirText}成功：已切换至 ${label}`;
+      setNotice(message);
+      // 成功状态反馈：明确方向、目标版本，并告知存档已保留（无损回滚）。
+      setUpgradeFeedback({
+        status: "success",
+        title: `${dirText}成功`,
+        detail: `已成功${dirText}至 ${label}（${targetVersion.version}），游戏存档已保留。`,
+      });
+    } catch (error) {
+      // 失败状态反馈：给出具体错误原因，便于用户针对性处理。
+      const detail = describeUpgradeError(error);
+      setNotice(`升降级失败：${detail}`);
+      setUpgradeFeedback({ status: "error", title: "升降级失败", detail });
+    } finally {
+      setBusy(null);
+    }
+  }
+
   async function applySettings(nextDraft: Settings, refreshAfterSave = false) {
     const saved = await saveSettings(nextDraft);
     setDraft(saved);
@@ -1102,6 +1194,7 @@ export default function App() {
         <button
           className={view === "games" ? "nav-button active" : "nav-button"}
           onClick={() => {
+            setUpgradeTargetId(null);
             setView("games");
             setNotice("已安装游戏列表已就绪");
           }}
@@ -1113,6 +1206,7 @@ export default function App() {
         <button
           className={view === "versions" ? "nav-button active" : "nav-button"}
           onClick={() => {
+            setUpgradeTargetId(null);
             setView("versions");
             setNotice("选择版本进行切换");
           }}
@@ -1124,6 +1218,7 @@ export default function App() {
         <button
           className={view === "runtimes" ? "nav-button active" : "nav-button"}
           onClick={() => {
+            setUpgradeTargetId(null);
             setView("runtimes");
             setNotice("管理本地与远端 Java 运行时");
           }}
@@ -1135,6 +1230,7 @@ export default function App() {
         <button
           className={view === "settings" ? "nav-button active" : "nav-button"}
           onClick={() => {
+            setUpgradeTargetId(null);
             setView("settings");
             setNotice("管理安装目录与加速源");
           }}
@@ -1147,6 +1243,7 @@ export default function App() {
           <button
             className={view === "debug" ? "nav-button active" : "nav-button"}
             onClick={() => {
+              setUpgradeTargetId(null);
               setView("debug");
               setNotice("调试控制台已打开");
             }}
@@ -1163,6 +1260,30 @@ export default function App() {
       </aside>
 
       <main className="workspace">
+        {upgradeFeedback && (
+          <div
+            className={`upgrade-feedback ${upgradeFeedback.status}`}
+            role={upgradeFeedback.status === "error" ? "alert" : "status"}
+            aria-live={upgradeFeedback.status === "error" ? "assertive" : "polite"}
+          >
+            {upgradeFeedback.status === "success" ? (
+              <CheckCircle2 size={18} className="uf-icon" />
+            ) : (
+              <AlertTriangle size={18} className="uf-icon" />
+            )}
+            <div className="uf-text">
+              <strong className="uf-title">{upgradeFeedback.title}</strong>
+              <span className="uf-detail">{upgradeFeedback.detail}</span>
+            </div>
+            <button
+              className="uf-close"
+              title="关闭"
+              onClick={() => setUpgradeFeedback(null)}
+            >
+              <X size={16} />
+            </button>
+          </div>
+        )}
         <header className="topbar">
           <div>
             <h1>{pageTitle}</h1>
@@ -1173,7 +1294,7 @@ export default function App() {
               <IconButton
                 title="打开版本列表"
                 label="版本列表"
-                onClick={() => setView("versions")}
+                onClick={() => { setUpgradeTargetId(null); setView("versions"); }}
               >
                 <Layers size={17} />
               </IconButton>
@@ -1224,7 +1345,7 @@ export default function App() {
                     <strong>暂无已安装游戏</strong>
                     <span>打开版本列表，选择一个版本切换到本地。</span>
                   </div>
-                  <button onClick={() => setView("versions")}>
+                  <button onClick={() => { setUpgradeTargetId(null); setView("versions"); }}>
                     <Layers size={17} />
                     <span>打开版本列表</span>
                   </button>
@@ -1293,6 +1414,15 @@ export default function App() {
         ) : view === "versions" ? (
           <section className="version-browser">
             <div className="version-list version-list-full">
+              {upgradeTargetId && instancesById.get(upgradeTargetId) && (
+                <div className="upgrade-hint">
+                  <span>升降级模式：选择 {instancesById.get(upgradeTargetId)!.version} 的目标版本</span>
+                  <button className="mini-button" onClick={() => setUpgradeTargetId(null)}>
+                    <X size={14} />
+                    <span>取消</span>
+                  </button>
+                </div>
+              )}
               <ChannelStrip
                 settings={draft ?? state?.settings ?? null}
                 busy={busy === "channelFilter"}
@@ -1324,7 +1454,16 @@ export default function App() {
                         </div>
                       </div>
                       <div className="version-actions">
-                        {instance ? (
+                        {upgradeTargetId && instancesById.get(upgradeTargetId) ? (
+                          <IconButton
+                            title="更换为此版本"
+                            label="更换版本"
+                            busy={busy === `upgradeTo:${version.id}`}
+                            onClick={() => onUpgradeToVersion(version)}
+                          >
+                            <RefreshCcw size={17} />
+                          </IconButton>
+                        ) : instance ? (
                           <>
                             <IconButton
                               title="启动游戏"
@@ -1409,6 +1548,9 @@ export default function App() {
             }}
             onCheckUpdate={handleCheckUpdate}
             updateInfo={updateInfo}
+            pingResults={pingResults}
+            pinging={pinging}
+            onPingAccelerator={onPingAccelerator}
           />
         )}
         <div className="debug-view" style={{ display: view === "debug" ? "grid" : "none" }}>
@@ -1446,6 +1588,7 @@ export default function App() {
               setEditingInstanceId(null);
               setInstanceSettingsDraft(null);
             }}
+            onUpgrade={onSelectUpgradeTarget}
           />
         )}
         {deleteConfirmation && (
@@ -1675,6 +1818,9 @@ function SettingsView(props: {
   onOpenInstallRoot: () => void;
   onCheckUpdate: () => void;
   updateInfo: LauncherUpdateInfo | null;
+  pingResults: Record<string, PingResult>;
+  pinging: Record<string, boolean>;
+  onPingAccelerator: (source: Accelerator) => void;
 }) {
   const { state, draft } = props;
   if (!draft) {
@@ -1778,6 +1924,61 @@ function SettingsView(props: {
           </select>
         </div>
 
+        <div className="setting-row split">
+          <label>加速源测速</label>
+          <label className="toggle-label">
+            <input
+              type="checkbox"
+              checked={draft.acceleratorPingEnabled}
+              onChange={() => props.updateDraft({ acceleratorPingEnabled: !draft.acceleratorPingEnabled })}
+            />
+            <span className="toggle-slider" />
+          </label>
+        </div>
+
+        {draft.acceleratorPingEnabled && (
+          <div className="accelerator-ping-list">
+            {(state?.accelerators.sources ?? []).map((source) => {
+              const ping = props.pingResults[source.id];
+              const isPinging = props.pinging[source.id];
+              return (
+                <div key={source.id} className="accelerator-ping-row">
+                  <span className="accelerator-ping-name">{source.name}</span>
+                  <span className="accelerator-ping-value">
+                    {isPinging ? (
+                      <span className="pinging">
+                        <Loader2 size={12} className="spin" />
+                        <span>正在测试…</span>
+                      </span>
+                    ) : ping ? (
+                      ping.latencyMs != null ? (
+                        `${ping.latencyMs}ms`
+                      ) : ping.error ? (
+                        "失败"
+                      ) : (
+                        ""
+                      )
+                    ) : (
+                      ""
+                    )}
+                  </span>
+                  <button
+                    className="mini-button"
+                    disabled={isPinging}
+                    onClick={() => props.onPingAccelerator(source)}
+                  >
+                    {isPinging ? (
+                      <Loader2 size={13} className="spin" />
+                    ) : (
+                      <Zap size={13} />
+                    )}
+                    <span>{isPinging ? "测试中" : "测试"}</span>
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        )}
 
         <div className="setting-row split">
           <label>调试模式</label>
@@ -2373,6 +2574,7 @@ function InstanceSettingsModal(props: {
   onLaunchSettingsChange: (patch: Partial<LaunchSettings>) => void;
   onSave: () => void;
   onClose: () => void;
+  onUpgrade?: (instanceId: string) => void;
 }) {
   const enabledRuntimes = props.runtimes.filter((runtime) => runtime.enabled);
   return (
@@ -2457,6 +2659,12 @@ function InstanceSettingsModal(props: {
           <button className="secondary-button" onClick={props.onClose}>
             取消
           </button>
+          {props.onUpgrade && (
+            <button className="secondary-button" onClick={() => props.onUpgrade!(props.instance.id)}>
+              <RefreshCcw size={17} />
+              <span>升降级</span>
+            </button>
+          )}
           <button className="save-button" onClick={props.onSave} disabled={props.busy}>
             {props.busy ? <Loader2 className="spin" size={17} /> : <Save size={17} />}
             <span>保存</span>
@@ -3065,4 +3273,60 @@ function formatDebugTime(value?: string | null) {
 
 function toMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error);
+}
+
+// 判断升降级方向：基于当前版本与目标版本的语义化数值比较。
+type VersionDirection = "upgrade" | "downgrade" | "unknown";
+
+function extractVersionTuple(value: string): [number, number, number] | null {
+  const match = value.match(/(\d+)(?:\.(\d+))?(?:\.(\d+))?/);
+  if (!match) return null;
+  return [
+    Number(match[1] ?? 0),
+    Number(match[2] ?? 0),
+    Number(match[3] ?? 0),
+  ];
+}
+
+function compareVersionDirection(
+  current: string,
+  target: string,
+): VersionDirection {
+  const a = extractVersionTuple(current);
+  const b = extractVersionTuple(target);
+  if (!a || !b) return "unknown";
+  for (let i = 0; i < 3; i += 1) {
+    if (b[i] !== a[i]) return b[i] > a[i] ? "upgrade" : "downgrade";
+  }
+  return "unknown";
+}
+
+// 将后端错误归类为用户可读的具体失败原因，确保失败提示清晰、可操作。
+function describeUpgradeError(error: unknown): string {
+  const raw = error instanceof Error ? error.message : String(error);
+  if (raw.includes("目标版本已安装")) {
+    return "目标版本已经安装，请先在当前版本管理中卸载该版本后再试。";
+  }
+  if (raw.includes("游戏正在运行")) {
+    return "游戏正在运行中，请先关闭游戏后再执行升降级。";
+  }
+  if (raw.includes("未找到待升降级的实例") || raw.includes("instance ")) {
+    return "未找到对应的游戏实例，可能已被删除，请刷新列表后重试。";
+  }
+  if (
+    raw.includes("缺少待升降级的游戏实例标识") ||
+    raw.includes("目标游戏版本缺少唯一标识")
+  ) {
+    return "升降级请求缺少必要的版本标识，请重新选择目标版本。";
+  }
+  if (raw.includes("目标版本与当前版本相同")) {
+    return "所选目标版本与当前版本相同，无需升降级。";
+  }
+  if (/网络|下载|request failed|下载已取消|Connect|timeout|timed out|resolve/i.test(raw)) {
+    return `网络或下载失败：${raw}。请检查网络连接后重试。`;
+  }
+  if (/runtime|Java|运行时|JRE/i.test(raw)) {
+    return `运行环境准备失败：${raw}，无法继续升降级。`;
+  }
+  return `升降级失败：${raw}`;
 }

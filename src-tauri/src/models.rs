@@ -74,6 +74,8 @@ pub struct Settings {
     pub debug_mode: bool,
     #[serde(default)]
     pub ignored_versions: Vec<String>,
+    #[serde(default)]
+    pub accelerator_ping_enabled: bool,
 }
 
 impl Settings {
@@ -83,13 +85,22 @@ impl Settings {
             show_be: false,
             github_proxy_prefix: None,
             http_proxy: None,
-            selected_accelerator_id: Some("hubproxy-kabaka".to_string()),
+            selected_accelerator_id: Some("direct".to_string()),
             channel_visibility: ChannelVisibility::default(),
             runtime_prompt_dismissed: false,
             debug_mode: false,
             ignored_versions: Vec::new(),
+            accelerator_ping_enabled: false,
         }
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PingResult {
+    pub source_id: String,
+    pub latency_ms: Option<u64>,
+    pub error: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -117,6 +128,13 @@ pub struct Accelerator {
     pub supports: AcceleratorSupports,
     pub health_check_url: Option<String>,
     pub enabled_by_default: bool,
+    /// 优先级：数值越小优先级越高，1 为最高。用于列表排序与默认选择。
+    #[serde(default = "default_priority")]
+    pub priority: u32,
+}
+
+fn default_priority() -> u32 {
+    100
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -147,6 +165,7 @@ impl Default for AcceleratorList {
                         "{DEFAULT_ACCELERATOR_PREFIX}https://github.com/"
                     )),
                     enabled_by_default: true,
+                    priority: 2,
                 },
                 Accelerator {
                     id: "direct".to_string(),
@@ -173,6 +192,7 @@ impl Default for AcceleratorList {
                     },
                     health_check_url: Some("https://github.com/".to_string()),
                     enabled_by_default: false,
+                    priority: 1,
                 },
             ],
         }

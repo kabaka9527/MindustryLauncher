@@ -14,9 +14,9 @@ mod versions;
 use crate::{
     error::AppResult,
     models::{
-        AcceleratorList, AppUiState, DebugLogSnapshot, InstalledInstance, LaunchResult,
-        LaunchSettings, LauncherUpdateInfo, MigrationResult, RemoteRuntime, RemoteVersion,
-        RuntimeInfo, Settings, TaskEvent,
+        Accelerator, AcceleratorList, AppUiState, DebugLogSnapshot, InstalledInstance,
+        LaunchResult, LaunchSettings, LauncherUpdateInfo, MigrationResult, PingResult,
+        RemoteRuntime, RemoteVersion, RuntimeInfo, Settings, TaskEvent,
     },
     versions::VersionRefreshScope,
 };
@@ -71,6 +71,44 @@ async fn refresh_accelerators(state: State<'_, LauncherState>) -> AppResult<Acce
     debug_console::info(format!("加速源刷新完成，共 {} 个加速源", list.sources.len()));
     *state.accelerators.write().await = list.clone();
     Ok(list)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+async fn ping_accelerator(
+    state: State<'_, LauncherState>,
+    source: Accelerator,
+) -> AppResult<PingResult> {
+    let settings = state.settings.read().await.clone();
+    let layout = config::layout_from_settings(&settings)?;
+    accelerators::ping_source(&settings, &layout, source).await
+}
+
+#[tauri::command(rename_all = "camelCase")]
+async fn list_upgradable_versions(
+    state: State<'_, LauncherState>,
+    instance_id: String,
+) -> AppResult<Vec<RemoteVersion>> {
+    let settings = state.settings.read().await.clone();
+    let layout = config::layout_from_settings(&settings)?;
+    let instances = config::load_instances(&layout)?;
+    let all_versions = versions::load_cached_versions(&layout)?;
+    Ok(instances::list_upgradable_versions(&instances, &all_versions, &instance_id)
+        .into_iter()
+        .cloned()
+        .collect())
+}
+
+#[tauri::command(rename_all = "camelCase")]
+async fn upgrade_instance(
+    state: State<'_, LauncherState>,
+    instance_id: String,
+    target_version: RemoteVersion,
+    on_event: Channel<TaskEvent>,
+) -> AppResult<InstalledInstance> {
+    let settings = state.settings.read().await.clone();
+    let accelerators = state.accelerators.read().await.clone();
+    let layout = config::layout_from_settings(&settings)?;
+    instances::upgrade_instance(&settings, &layout, &accelerators, instance_id, target_version, on_event).await
 }
 
 #[tauri::command(rename_all = "camelCase")]
@@ -427,6 +465,9 @@ pub fn run() {
             get_app_state,
             save_settings,
             refresh_accelerators,
+            ping_accelerator,
+            list_upgradable_versions,
+            upgrade_instance,
             refresh_versions,
             startup_refresh_versions,
             install_version,

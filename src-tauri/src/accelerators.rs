@@ -4,7 +4,8 @@ use crate::{
     error::{AppError, AppResult},
     fs_util,
     models::{
-        Accelerator, AcceleratorList, Settings, DEFAULT_ACCELERATOR_PREFIX, REMOTE_ACCELERATOR_LIST,
+        Accelerator, AcceleratorList, PingResult, Settings, DEFAULT_ACCELERATOR_PREFIX,
+        REMOTE_ACCELERATOR_LIST,
     },
     network::NetworkClient,
 };
@@ -103,7 +104,7 @@ async fn fetch_accelerator_list_from_urls(
 }
 
 pub fn bundled_accelerators() -> AcceleratorList {
-    match parse_bundled_accelerators() {
+    let list = match parse_bundled_accelerators() {
         Ok(list) => list,
         Err(err) => {
             debug_console::warn(format!(
@@ -111,7 +112,14 @@ pub fn bundled_accelerators() -> AcceleratorList {
             ));
             AcceleratorList::default()
         }
-    }
+    };
+    sort_by_priority(list)
+}
+
+/// 按优先级升序排序：数值越小越靠前（1 为最高优先级）。
+pub fn sort_by_priority(mut list: AcceleratorList) -> AcceleratorList {
+    list.sources.sort_by_key(|source| source.priority);
+    list
 }
 
 fn parse_bundled_accelerators() -> AppResult<AcceleratorList> {
@@ -139,7 +147,7 @@ fn ensure_required_sources(mut list: AcceleratorList) -> AcceleratorList {
             list.sources.push(source);
         }
     }
-    list
+    sort_by_priority(list)
 }
 
 fn discard_legacy_accelerator_cache(layout: &InstallLayout) -> AppResult<()> {
@@ -153,6 +161,117 @@ fn discard_legacy_accelerator_cache(layout: &InstallLayout) -> AppResult<()> {
         Err(err) if err.kind() == ErrorKind::NotFound => Ok(()),
         Err(err) => Err(AppError::Io(err.to_string())),
     }
+}
+
+// 通用健康检查：以后端随时下发的加速源列表为准，不依赖各源硬编码的 healthCheckUrl。
+// 优先使用源显式指定的健康检查地址；否则根据该源自身的 baseUrl / rules / supports
+// 自动推导一个稳定且轻量的探测目标（优先 Raw 小文件，其次 Release / API），
+// 从而适配未来新增或更新的加速源。
+const HEALTH_PROBE_TARGETS: &[(&str, GithubTarget)] = &[
+    (
+        "https://raw.githubusercontent.com/kabaka9527/MindustryLauncher/main/README.md",
+        GithubTarget::Raw,
+    ),
+    (
+        "https://github.com/kabaka9527/MindustryLauncher",
+        GithubTarget::ReleaseAsset,
+    ),
+    (
+        "https://api.github.com/repos/kabaka9527/MindustryLauncher",
+        GithubTarget::Api,
+    ),
+];
+
+// 推导某加速源的健康检查地址：显式覆盖优先，缺失时按源自身重写规则自动生成。
+pub fn derive_health_check_url(source: &Accelerator) -> Option<String> {
+    if let Some(url) = source
+        .health_check_url
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        return Some(url.to_string());
+    }
+    let (target, _) = HEALTH_PROBE_TARGETS
+        .iter()
+        .find(|(_, target)| supports_target(source, *target))?;
+    Some(apply_source_rewrite(source, target))
+}
+
+// 按单个加速源自身的 baseUrl / rules 重写目标 URL（等价于 rewrite_github_url 的单源逻辑）。
+fn apply_source_rewrite(source: &Accelerator, original: &str) -> String {
+    if !source.base_url.trim().is_empty() {
+        return prefix_url(&source.base_url, original);
+    }
+    for rule in &source.rules {
+        if original.starts_with(&rule.from) {
+            return original.replacen(&rule.from, &rule.to, 1);
+        }
+    }
+    original.to_string()
+}
+
+// 生成加速源的健康检查候选地址（按优先级）：显式 healthCheckUrl 优先，
+// 其余为该源支持的通用探测目标（Raw -> Release -> Api）。依次尝试，
+// 确保即使某类目标（如镜像不代理 raw）不可达，也能回退到其他可用目标。
+fn health_check_candidates(source: &Accelerator) -> Vec<String> {
+    let mut candidates = Vec::new();
+    // 首个候选为显式地址或自动推导地址（Raw 优先），其余为该源支持的其他通用目标作为回退。
+    if let Some(url) = derive_health_check_url(source) {
+        candidates.push(url);
+    }
+    for (target, github_target) in HEALTH_PROBE_TARGETS {
+        if supports_target(source, *github_target) {
+            let url = apply_source_rewrite(source, *target);
+            if !candidates.iter().any(|existing| existing == &url) {
+                candidates.push(url);
+            }
+        }
+    }
+    candidates
+}
+
+pub async fn ping_source(
+    settings: &Settings,
+    layout: &InstallLayout,
+    source: Accelerator,
+) -> AppResult<PingResult> {
+    let network = NetworkClient::new(settings, layout.cache_dir.join("http"))?;
+    // 依次尝试候选地址，任一成功即返回延迟；全部失败才记为不可达（详见调试日志）。
+    for url in health_check_candidates(&source) {
+        debug_console::info(format!(
+            "[加速源健康检测] 探测源 {} 地址 {}",
+            source.id, url
+        ));
+        match network.probe_latency(&url).await {
+            Ok(ms) => {
+                debug_console::info(format!(
+                    "[加速源健康检测] 源 {} 探测成功，延迟 {}ms",
+                    source.id, ms
+                ));
+                return Ok(PingResult {
+                    source_id: source.id,
+                    latency_ms: Some(ms),
+                    error: None,
+                });
+            }
+            Err(err) => {
+                debug_console::warn(format!(
+                    "[加速源健康检测] 源 {} 候选地址探测失败：{}",
+                    source.id, err
+                ));
+            }
+        }
+    }
+    debug_console::error(format!(
+        "[加速源健康检测] 源 {} 所有候选地址均探测失败",
+        source.id
+    ));
+    Ok(PingResult {
+        source_id: source.id,
+        latency_ms: None,
+        error: Some("健康检查失败：所有候选地址均不可达".to_string()),
+    })
 }
 
 pub fn rewrite_github_url(
@@ -181,7 +300,7 @@ pub fn rewrite_github_url(
             accelerators
                 .sources
                 .iter()
-                .find(|source| source.enabled_by_default)
+                .min_by_key(|source| source.priority)
         });
 
     if let Some(source) = selected {
@@ -242,13 +361,13 @@ fn supports_target(source: &Accelerator, target: GithubTarget) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        bundled_accelerators, discard_legacy_accelerator_cache, fetch_accelerator_list_from_urls,
-        github_url_candidates, prefix_url, rewrite_github_url,
-    };
+use super::{
+    bundled_accelerators, derive_health_check_url, discard_legacy_accelerator_cache,
+    fetch_accelerator_list_from_urls, github_url_candidates, prefix_url, rewrite_github_url,
+};
     use crate::{
         config::InstallLayout,
-        models::{AcceleratorList, Settings},
+        models::{Accelerator, AcceleratorList, AcceleratorSupports, Settings},
     };
     use std::{
         fs,
@@ -347,8 +466,9 @@ mod tests {
     }
 
     #[test]
-    fn prefixes_default_github_url() {
+    fn default_accelerator_is_direct_connection() {
         let settings = Settings::with_install_root("D:/MindustryLauncher/app-data".to_string());
+        assert_eq!(settings.selected_accelerator_id.as_deref(), Some("direct"));
         let rewritten = rewrite_github_url(
             "https://api.github.com/repos/Anuken/Mindustry/releases",
             &settings,
@@ -356,12 +476,12 @@ mod tests {
         );
         assert_eq!(
             rewritten,
-            "https://hubproxy.kabaka.xyz/https://api.github.com/repos/Anuken/Mindustry/releases"
+            "https://api.github.com/repos/Anuken/Mindustry/releases"
         );
     }
 
     #[test]
-    fn candidates_include_direct_fallback() {
+    fn candidates_keep_original_for_direct_default() {
         let settings = Settings::with_install_root("D:/MindustryLauncher/app-data".to_string());
         let urls = github_url_candidates(
             "https://api.github.com/repos/Anuken/Mindustry/releases",
@@ -370,10 +490,7 @@ mod tests {
         );
         assert_eq!(
             urls,
-            vec![
-                "https://hubproxy.kabaka.xyz/https://api.github.com/repos/Anuken/Mindustry/releases",
-                "https://api.github.com/repos/Anuken/Mindustry/releases"
-            ]
+            vec!["https://api.github.com/repos/Anuken/Mindustry/releases"]
         );
     }
 
@@ -412,6 +529,81 @@ mod tests {
         assert_eq!(
             prefix_url("https://a.example/", "/https://github.com/test"),
             "https://a.example/https://github.com/test"
+        );
+    }
+
+    #[test]
+    fn derive_health_check_url_uses_explicit_when_present() {
+        let source = Accelerator {
+            id: "mirror-x".to_string(),
+            name: "Mirror X".to_string(),
+            base_url: "https://mirror-x.example/".to_string(),
+            rules: vec![],
+            supports: AcceleratorSupports {
+                api: true,
+                raw: true,
+                release_asset: true,
+            },
+            health_check_url: Some("https://mirror-x.example/healthz".to_string()),
+            enabled_by_default: false,
+            priority: 100,
+        };
+        assert_eq!(
+            derive_health_check_url(&source),
+            Some("https://mirror-x.example/healthz".to_string())
+        );
+    }
+
+    #[test]
+    fn derive_health_check_url_falls_back_when_absent() {
+        let source = Accelerator {
+            id: "mirror-x".to_string(),
+            name: "Mirror X".to_string(),
+            base_url: "https://mirror-x.example/".to_string(),
+            rules: vec![],
+            supports: AcceleratorSupports {
+                api: true,
+                raw: true,
+                release_asset: true,
+            },
+            health_check_url: None,
+            enabled_by_default: false,
+            priority: 100,
+        };
+        assert_eq!(
+            derive_health_check_url(&source),
+            Some(
+                "https://mirror-x.example/https://raw.githubusercontent.com/kabaka9527/MindustryLauncher/main/README.md"
+                    .to_string()
+            )
+        );
+    }
+
+    #[test]
+    fn derive_health_check_url_uses_rules_when_no_base_url() {
+        let source = Accelerator {
+            id: "mirror-rules".to_string(),
+            name: "Mirror Rules".to_string(),
+            base_url: String::new(),
+            rules: vec![crate::models::AcceleratorRule {
+                from: "https://raw.githubusercontent.com/".to_string(),
+                to: "https://rules.example/raw/".to_string(),
+            }],
+            supports: AcceleratorSupports {
+                api: false,
+                raw: true,
+                release_asset: false,
+            },
+            health_check_url: None,
+            enabled_by_default: false,
+            priority: 100,
+        };
+        assert_eq!(
+            derive_health_check_url(&source),
+            Some(
+                "https://rules.example/raw/kabaka9527/MindustryLauncher/main/README.md"
+                    .to_string()
+            )
         );
     }
 

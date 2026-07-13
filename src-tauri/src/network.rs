@@ -7,7 +7,7 @@ use crate::{
 use reqwest::{
     header::{ACCEPT_ENCODING, CONTENT_LENGTH, CONTENT_RANGE, RANGE},
     redirect::Policy,
-    Client, StatusCode,
+    Client, ClientBuilder, StatusCode,
 };
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -137,7 +137,7 @@ impl NetworkClient {
         fs_util::ensure_dir(&cache_dir)?;
         // reqwest's default features include system-proxy. When the user sets
         // a proxy, disable system proxies first so the explicit value wins.
-        let mut builder = Client::builder()
+        let builder = Client::builder()
             .connect_timeout(Duration::from_secs(15))
             .read_timeout(Duration::from_secs(30))
             .redirect(Policy::limited(5))
@@ -147,19 +147,97 @@ impl NetworkClient {
             .no_zstd()
             .user_agent(USER_AGENT);
 
-        if let Some(proxy) = settings
+        let builder = if let Some(proxy) = settings
             .http_proxy
             .as_deref()
             .map(str::trim)
             .filter(|v| !v.is_empty())
         {
-            builder = builder.no_proxy().proxy(reqwest::Proxy::all(proxy)?);
-        }
+            // 显式代理优先：禁用系统代理，仅用用户指定值。
+            builder.no_proxy().proxy(reqwest::Proxy::all(proxy)?)
+        } else {
+            // 未显式配置时：环境变量代理交给 reqwest 默认读取；
+            // 否则在 Windows 上读取系统代理（设置-网络-代理 / IE 代理），
+            // 覆盖仅通过 GUI 配置、未设 HTTP_PROXY 环境变量的场景。
+            apply_system_proxy(builder)?
+        };
 
         Ok(Self {
             client: builder.build()?,
             cache_dir,
         })
+    }
+
+    // 探测镜像延迟：优先 HEAD（最轻量），若服务器不支持 HEAD（多数 ghproxy 类
+    // 镜像代理对代理路径不实现 HEAD，会返回 405/400 等非 2xx，导致测不到延迟），
+    // 则回退到 GET + Range(仅取首字节) 探测，保证延迟可被正常测得。
+    // 每一步均写入调试日志（仅在调试模式开启时落盘/推送），便于排查探测失败原因。
+    pub async fn probe_latency(&self, url: &str) -> AppResult<u64> {
+        if let Ok(ms) = self.try_head(url).await {
+            return Ok(ms);
+        }
+        debug_console::log(format!(
+            "[加速源健康检测] HEAD 不可用，回退 GET 探测 {url}"
+        ));
+        let start = Instant::now();
+        match self
+            .client
+            .get(url)
+            .header(RANGE, "bytes=0-0")
+            .send()
+            .await
+        {
+            Ok(response) => {
+                let elapsed = start.elapsed();
+                if response.status().is_success() {
+                    debug_console::log(format!(
+                        "[加速源健康检测] GET 成功 {url} -> {}ms",
+                        elapsed.as_millis()
+                    ));
+                    Ok(elapsed.as_millis() as u64)
+                } else {
+                    let status = response.status();
+                    debug_console::log(format!(
+                        "[加速源健康检测] GET 非 2xx {url} -> HTTP {status}"
+                    ));
+                    Err(AppError::Network(format!("{url} returned HTTP {status}")))
+                }
+            }
+            Err(err) => {
+                debug_console::log(format!(
+                    "[加速源健康检测] GET 请求失败 {url} -> {err}"
+                ));
+                Err(AppError::Network(err.to_string()))
+            }
+        }
+    }
+
+    async fn try_head(&self, url: &str) -> AppResult<u64> {
+        let start = Instant::now();
+        match self.client.head(url).send().await {
+            Ok(response) => {
+                let elapsed = start.elapsed();
+                if response.status().is_success() {
+                    debug_console::log(format!(
+                        "[加速源健康检测] HEAD 成功 {url} -> {}ms",
+                        elapsed.as_millis()
+                    ));
+                    Ok(elapsed.as_millis() as u64)
+                } else {
+                    let status = response.status();
+                    debug_console::log(format!(
+                        "[加速源健康检测] HEAD 非 2xx/不支持 {url} -> HTTP {status}"
+                    ));
+                    Err(AppError::Network(format!("{url} returned HTTP {status}")))
+                }
+            }
+            Err(err) => {
+                debug_console::log(format!(
+                    "[加速源健康检测] HEAD 请求失败 {url} -> {err}"
+                ));
+                Err(AppError::Network(err.to_string()))
+            }
+        }
     }
 
     pub async fn get_json<T: DeserializeOwned>(&self, url: &str) -> AppResult<T> {
@@ -654,11 +732,154 @@ async fn wait_for_download_resume_or_cancel(
     }
 }
 
+// 未显式配置代理时的系统代理解析：环境变量优先（reqwest 默认会读取），
+// Windows 上再回退到系统代理（设置-网络-代理 / IE 代理），
+// 覆盖仅通过 GUI 配置、未设 HTTP_PROXY 环境变量的场景。
+// 注意：仅手动代理服务器（lpszProxy）生效；PAC（自动配置脚本）与自动检测未覆盖。
+fn apply_system_proxy(builder: ClientBuilder) -> AppResult<ClientBuilder> {
+    if env_proxy_configured() {
+        return Ok(builder);
+    }
+    #[cfg(windows)]
+    {
+        if let Some(server) = windows_ie_proxy_server() {
+            let (http, https) = parse_ie_proxy_server(&server);
+            let mut builder = builder;
+            if let Some(http) = http {
+                builder = builder.proxy(reqwest::Proxy::http(http)?);
+            }
+            if let Some(https) = https {
+                builder = builder.proxy(reqwest::Proxy::https(https)?);
+            }
+            debug_console::log(format!("[系统代理] 使用 Windows 系统代理：{server}"));
+            return Ok(builder);
+        }
+    }
+    Ok(builder)
+}
+
+fn env_proxy_configured() -> bool {
+    const KEYS: &[&str] = &[
+        "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy",
+    ];
+    KEYS
+        .iter()
+        .any(|key| std::env::var(key).map(|value| !value.trim().is_empty()).unwrap_or(false))
+}
+
+// 解析 IE/系统代理服务器字符串（如 "http=host:80;https=host:443" 或裸 "host:8080"），
+// 返回 (http, https) 两个代理 URL。任一缺失时回退到另一个，保证 https 下载（GitHub）可用。
+fn parse_ie_proxy_server(server: &str) -> (Option<String>, Option<String>) {
+    let mut http = None;
+    let mut https = None;
+    for part in server.split(';') {
+        let part = part.trim();
+        if part.is_empty() {
+            continue;
+        }
+        if let Some((scheme, addr)) = part.split_once('=') {
+            let addr = addr.trim();
+            if addr.is_empty() {
+                continue;
+            }
+            match scheme.to_ascii_lowercase().as_str() {
+                "http" => http = Some(format!("http://{addr}")),
+                "https" => https = Some(format!("https://{addr}")),
+                _ => {}
+            }
+        } else {
+            let url = format!("http://{part}");
+            if http.is_none() {
+                http = Some(url.clone());
+            }
+            if https.is_none() {
+                https = Some(url);
+            }
+        }
+    }
+    let http = http.or_else(|| https.clone());
+    let https = https.or_else(|| http.clone());
+    (http, https)
+}
+
+#[cfg(windows)]
+fn windows_ie_proxy_server() -> Option<String> {
+    use windows_sys::Win32::Foundation::GlobalFree;
+    use windows_sys::Win32::Networking::WinHttp::{
+        WinHttpGetIEProxyConfigForCurrentUser, WINHTTP_CURRENT_USER_IE_PROXY_CONFIG,
+    };
+    unsafe {
+        let mut config = WINHTTP_CURRENT_USER_IE_PROXY_CONFIG {
+            fAutoDetect: 0,
+            lpszAutoConfigUrl: std::ptr::null_mut(),
+            lpszProxy: std::ptr::null_mut(),
+            lpszProxyBypass: std::ptr::null_mut(),
+        };
+        if WinHttpGetIEProxyConfigForCurrentUser(&mut config) == 0 {
+            return None;
+        }
+        let proxy = pwstr_to_string(config.lpszProxy);
+        for ptr in [
+            config.lpszAutoConfigUrl,
+            config.lpszProxy,
+            config.lpszProxyBypass,
+        ] {
+            if !ptr.is_null() {
+                let _ = GlobalFree(ptr as *mut _);
+            }
+        }
+        proxy
+    }
+}
+
+#[cfg(windows)]
+unsafe fn pwstr_to_string(ptr: windows_sys::core::PWSTR) -> Option<String> {
+    if ptr.is_null() {
+        return None;
+    }
+    let mut len = 0usize;
+    while *ptr.add(len) != 0 {
+        len += 1;
+    }
+    if len == 0 {
+        return None;
+    }
+    let slice = std::slice::from_raw_parts(ptr, len);
+    let value = String::from_utf16_lossy(slice);
+    if value.is_empty() {
+        None
+    } else {
+        Some(value)
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{partial_download_len, verify_file_digest};
+    use super::{partial_download_len, parse_ie_proxy_server, verify_file_digest};
     use std::path::PathBuf;
     use tokio::{fs, io::AsyncWriteExt};
+
+    #[test]
+    fn parses_bare_ie_proxy_as_http_and_https() {
+        let (http, https) = parse_ie_proxy_server("proxy.example.com:8080");
+        assert_eq!(http.as_deref(), Some("http://proxy.example.com:8080"));
+        assert_eq!(https.as_deref(), Some("http://proxy.example.com:8080"));
+    }
+
+    #[test]
+    fn parses_per_scheme_ie_proxy() {
+        let (http, https) =
+            parse_ie_proxy_server("http=10.0.0.1:80;https=10.0.0.1:443");
+        assert_eq!(http.as_deref(), Some("http://10.0.0.1:80"));
+        assert_eq!(https.as_deref(), Some("https://10.0.0.1:443"));
+    }
+
+    #[test]
+    fn parses_https_only_ie_proxy_falls_back_to_http() {
+        let (http, https) = parse_ie_proxy_server("https=proxy:8443");
+        assert_eq!(https.as_deref(), Some("https://proxy:8443"));
+        assert_eq!(http.as_deref(), Some("https://proxy:8443"));
+    }
 
     #[tokio::test]
     async fn verifies_sha256_digest() {

@@ -1,33 +1,7 @@
 {
-  "version": 1,
+  "version": 2,
   "updatedAt": "2026-06-11T00:00:00Z",
   "sources": [
-    {
-      "id": "hubproxy-kabaka",
-      "name": "HubProxy",
-      "baseUrl": "https://hubproxy.kabaka.xyz/",
-      "rules": [],
-      "supports": {
-        "api": true,
-        "raw": true,
-        "releaseAsset": true
-      },
-      "healthCheckUrl": "https://hubproxy.kabaka.xyz/https://github.com/",
-      "enabledByDefault": true
-    },
-    {
-      "id": "gh-proxy",
-      "name": "GHProxy GitHub 加速",
-      "baseUrl": "https://gh-proxy.com/",
-      "rules": [],
-      "supports": {
-        "api": false,
-        "raw": true,
-        "releaseAsset": true
-      },
-      "healthCheckUrl": "https://gh-proxy.com/https://github.com/",
-      "enabledByDefault": false
-    },
     {
       "id": "direct",
       "name": "GitHub 直连",
@@ -51,8 +25,37 @@
         "raw": true,
         "releaseAsset": true
       },
-      "healthCheckUrl": "https://github.com/",
-      "enabledByDefault": true
+      "healthCheckUrl": "https://raw.githubusercontent.com/kabaka9527/MindustryLauncher/main/README.md",
+      "enabledByDefault": true,
+      "priority": 1
+    },
+    {
+      "id": "hubproxy-kabaka",
+      "name": "HubProxy",
+      "baseUrl": "https://hubproxy.kabaka.xyz/",
+      "rules": [],
+      "supports": {
+        "api": true,
+        "raw": true,
+        "releaseAsset": true
+      },
+      "healthCheckUrl": "https://hubproxy.kabaka.xyz/https://raw.githubusercontent.com/kabaka9527/MindustryLauncher/main/README.md",
+      "enabledByDefault": false,
+      "priority": 2
+    },
+    {
+      "id": "gh-proxy",
+      "name": "GHProxy GitHub 加速",
+      "baseUrl": "https://gh-proxy.com/",
+      "rules": [],
+      "supports": {
+        "api": false,
+        "raw": true,
+        "releaseAsset": true
+      },
+      "healthCheckUrl": "https://gh-proxy.com/https://raw.githubusercontent.com/kabaka9527/MindustryLauncher/main/README.md",
+      "enabledByDefault": false,
+      "priority": 3
     }
   ]
 }

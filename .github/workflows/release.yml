@@ -185,10 +185,20 @@ jobs:
           }
 
           $asset = "src-tauri/target/release/mindustry-launcher.exe"
+          $prevTag = (git describe --tags --abbrev=0 HEAD 2>$null)
+          $range = if ($prevTag) { "$prevTag..HEAD" } else { "HEAD" }
+          $raw = git log --no-merges --invert-grep --grep="^release:" --pretty=format:"- %s (%h)" $range 2>$null
+          $commits = if ($raw) { ($raw -join "`n").Trim() } else { "" }
+          if (-not $commits) {
+            $commits = "- 无显式变更记录"
+          }
           $notes = @"
           MindustryLauncher $env:RELEASE_TAG
 
-          自动构建产物：
+          更新内容：
+          $commits
+
+          构建产物：
           - $asset
           "@
 
